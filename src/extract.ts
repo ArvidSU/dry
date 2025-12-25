@@ -47,16 +47,21 @@ function isInsideComment(content: string, position: number): boolean {
  * It finds the signature and then captures the element body by balancing braces.
  * 
  * @param filePath Path to the file to parse
- * @param signatureRegexes Array of regexes to match the element signature. 
+ * @param includeRegexes Array of regexes to match the element signature. 
  *                        If it has a capture group, the first one is used as element name.
+ * @param excludeRegexes Array of regexes to exclude matching signatures.
  * @returns Array of extracted elements with metadata
  */
-export function extractElements(filePath: string, signatureRegexes: RegExp[]): ElementData[] {
+export function extractElements(
+  filePath: string, 
+  includeRegexes: RegExp[], 
+  excludeRegexes: RegExp[] = []
+): ElementData[] {
   const content = fs.readFileSync(filePath, 'utf-8');
   const elements: ElementData[] = [];
   const seenPositions = new Set<number>();
 
-  for (const signatureRegex of signatureRegexes) {
+  for (const signatureRegex of includeRegexes) {
     // Ensure global flag for matchAll
     const regex = new RegExp(signatureRegex.source, signatureRegex.flags.includes('g') ? signatureRegex.flags : signatureRegex.flags + 'g');
     
@@ -64,6 +69,12 @@ export function extractElements(filePath: string, signatureRegexes: RegExp[]): E
 
     for (const match of matches) {
       const signature = match[0];
+
+      // Skip if the signature matches any exclude pattern
+      if (excludeRegexes.some(excludeRegex => excludeRegex.test(signature))) {
+        continue;
+      }
+
       const startIndex = match.index!;
       const elementName = match[1] || signature.trim();
 

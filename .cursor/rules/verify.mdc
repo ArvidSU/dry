@@ -1,0 +1,4 @@
+---
+alwaysApply: true
+---
+After making changes, run 'bun run verify' to verify the changes.

@@ -2,27 +2,18 @@
 url = "http://localhost:3000"
 
 [scan]
-extensions = ["ts"]
-ignore = [
-  "node_modules/",
-  ".git/",
-  "dist/",
-  "build/",
-  "test_dir/",
-  ".svelte-kit/"
-]
-use_ignore_files = [".gitignore", ".dockerignore"]
+use_ignore_files = [".gitignore", ".dockerignore", ".dryignore"]
 
 [scan.similarity]
 threshold = 0.6
 limit = 10
 
-[scan.languages]
-ts = [
+[scan.languages.ts]
+include = [
   'function\s+(\w+)\s*\(',                           # function declarations
   'const\s+(\w+)\s*=\s*\([^)]*\)\s*=>',           # arrow functions
   '(\w+):\s*function\s*\(',                           # object functions
   'if\s*\([^)]*\)\s*{',                            # if cases
   'for\s*\([^)]*\)\s*{',                            # for cases
-  
 ]
+exclude = []

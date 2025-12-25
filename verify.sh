@@ -4,10 +4,9 @@ set -e
 echo "Verifying changes..."
 
 bun install
-
+bun run build
 bun test
 
-bun run link
 
 docker compose down
 docker compose up --build --force-recreate -d

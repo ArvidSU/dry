@@ -63,16 +63,12 @@ program
       const config = resolveConfig(resolvedPath, options);
       
       const serverUrl = config.server?.url || 'http://localhost:3000';
-      const extensions = config.scan?.extensions || ['ts', 'tsx', 'js', 'jsx'];
-      const ignorePatterns = [...(config.scan?.ignore || ['node_modules/', '.git/', 'dist/', 'build/'])];
-      const useIgnoreFiles = config.scan?.use_ignore_files || [];
       const languages = config.scan?.languages || {};
+      const extensions = config.scan?.extensions || Object.keys(languages);
+      const useIgnoreFiles = config.scan?.use_ignore_files || ['.gitignore', '.dockerignore', '.dryignore'];
 
-      if (useIgnoreFiles.length > 0) {
-        const rootPathForIgnore = fs.statSync(resolvedPath).isDirectory() ? resolvedPath : path.dirname(resolvedPath);
-        const additionalPatterns = loadIgnoreFiles(rootPathForIgnore, useIgnoreFiles);
-        ignorePatterns.push(...additionalPatterns);
-      }
+      const rootPathForIgnore = fs.statSync(resolvedPath).isDirectory() ? resolvedPath : path.dirname(resolvedPath);
+      const ignorePatterns = loadIgnoreFiles(rootPathForIgnore, useIgnoreFiles);
       
       const client = new DryClient(serverUrl);
 
@@ -105,18 +101,22 @@ program
         console.log(`Scanning ${path.relative(process.cwd(), filePath)}...`);
         
         const ext = path.extname(filePath).toLowerCase().slice(1);
-        let regexPatterns: RegExp[] = [];
+        let includePatterns: RegExp[] = [];
+        let excludePatterns: RegExp[] = [];
         
         if (options.regex) {
-          regexPatterns = [new RegExp(options.regex, 'g')];
+          includePatterns = [new RegExp(options.regex, 'g')];
         } else if (languages[ext]) {
-          regexPatterns = languages[ext].map(p => new RegExp(p, 'g'));
+          includePatterns = languages[ext].include.map(p => new RegExp(p, 'g'));
+          if (languages[ext].exclude) {
+            excludePatterns = languages[ext].exclude!.map(p => new RegExp(p, 'g'));
+          }
         } else {
           // Fallback to default regex if no language specific one is found
-          regexPatterns = [/\bfunction\s+(\w+)\s*\(/g];
+          includePatterns = [/\bfunction\s+(\w+)\s*\(/g];
         }
 
-        const elements = extractElements(filePath, regexPatterns);
+        const elements = extractElements(filePath, includePatterns, excludePatterns);
         
         if (elements.length === 0) continue;
 

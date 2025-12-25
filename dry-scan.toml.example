@@ -8,21 +8,8 @@ url = "http://localhost:3000"
 # File extensions to include in the scan
 extensions = ["ts", "tsx", "js", "jsx", "py", "go"]
 
-# Patterns to ignore during scanning (minimatch/glob style)
-# Directories should end with / or be followed by /**
-ignore = [
-  "node_modules/",
-  ".git/",
-  "dist/",
-  "build/",
-  "venv/",
-  "__pycache__/",
-  "*.test.ts",
-  "*.spec.ts"
-]
-
-# Files to load additional ignore patterns from (e.g., .gitignore, .dockerignore)
-use_ignore_files = [".gitignore", ".dockerignore"]
+# Files to load additional ignore patterns from (e.g., .gitignore, .dockerignore, .dryignore)
+use_ignore_files = [".gitignore", ".dockerignore", ".dryignore"]
 
 [scan.similarity]
 # Default similarity threshold (0-1)

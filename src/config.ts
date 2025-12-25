@@ -3,8 +3,13 @@ import path from 'path';
 import * as TOML from '@iarna/toml';
 import { minimatch } from 'minimatch';
 
+export interface LanguagePatterns {
+  include: string[];
+  exclude?: string[];
+}
+
 export interface LanguageConfig {
-  [extension: string]: string[];
+  [extension: string]: LanguagePatterns;
 }
 
 export interface SimilarityConfig {
@@ -18,7 +23,6 @@ export interface ScanConfig {
   };
   scan?: {
     extensions?: string[];
-    ignore?: string[];
     use_ignore_files?: string[];
     similarity?: SimilarityConfig;
     languages?: LanguageConfig;
@@ -31,16 +35,24 @@ export const DEFAULT_CONFIG: ScanConfig = {
   },
   scan: {
     extensions: ['ts', 'tsx', 'js', 'jsx'],
-    ignore: ['node_modules/', '.git/', 'dist/', 'build/'],
+    use_ignore_files: ['.gitignore', '.dockerignore', '.dryignore'],
     similarity: {
       threshold: 0.8,
       limit: 10,
     },
     languages: {
-      ts: ['\\bfunction\\s+(\\w+)\\s*\\(', '\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>', '\\b(\\w+)\\s*:\\s*function\\s*\\('],
-      tsx: ['\\bfunction\\s+(\\w+)\\s*\\(', '\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>', '\\b(\\w+)\\s*:\\s*function\\s*\\('],
-      js: ['\\bfunction\\s+(\\w+)\\s*\\(', '\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>', '\\b(\\w+)\\s*:\\s*function\\s*\\('],
-      jsx: ['\\bfunction\\s+(\\w+)\\s*\\(', '\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>', '\\b(\\w+)\\s*:\\s*function\\s*\\('],
+      ts: {
+        include: ['\\bfunction\\s+(\\w+)\\s*\\(', '\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>', '\\b(\\w+)\\s*:\\s*function\\s*\\('],
+      },
+      tsx: {
+        include: ['\\bfunction\\s+(\\w+)\\s*\\(', '\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>', '\\b(\\w+)\\s*:\\s*function\\s*\\('],
+      },
+      js: {
+        include: ['\\bfunction\\s+(\\w+)\\s*\\(', '\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>', '\\b(\\w+)\\s*:\\s*function\\s*\\('],
+      },
+      jsx: {
+        include: ['\\bfunction\\s+(\\w+)\\s*\\(', '\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>', '\\b(\\w+)\\s*:\\s*function\\s*\\('],
+      },
     },
   },
 };
@@ -74,36 +86,10 @@ export function loadConfig(configPath: string): ScanConfig {
   try {
     const content = fs.readFileSync(configPath, 'utf-8');
     const parsed = TOML.parse(content) as unknown as ScanConfig;
-    return mergeConfigs(DEFAULT_CONFIG, parsed);
+    return parsed;
   } catch (error: any) {
-    console.warn(`Warning: Failed to load config from ${configPath}: ${error.message}`);
-    return DEFAULT_CONFIG;
+    throw new Error(`Failed to load/parse config from ${configPath}: ${error.message}`);
   }
-}
-
-/**
- * Merges two configurations, with the second one taking priority.
- * This is a shallow merge for top level and one level deep for scan and server.
- */
-function mergeConfigs(base: ScanConfig, override: ScanConfig): ScanConfig {
-  return {
-    server: {
-      ...base.server,
-      ...override.server,
-    },
-    scan: {
-      ...base.scan,
-      ...override.scan,
-      similarity: {
-        ...base.scan?.similarity,
-        ...override.scan?.similarity,
-      } as SimilarityConfig,
-      languages: {
-        ...base.scan?.languages,
-        ...override.scan?.languages,
-      } as LanguageConfig,
-    },
-  };
 }
 
 /**
@@ -111,7 +97,10 @@ function mergeConfigs(base: ScanConfig, override: ScanConfig): ScanConfig {
  */
 export function resolveConfig(scanPath: string, cliOptions: any): ScanConfig {
   const configPath = findConfigFile(path.resolve(scanPath));
-  let config = configPath ? loadConfig(configPath) : DEFAULT_CONFIG;
+  let config: ScanConfig = {};
+  if (configPath) {
+    config = loadConfig(configPath);
+  }
 
   // Merge CLI options (CLI overrides config)
   if (cliOptions.url) {
@@ -166,16 +155,12 @@ export function loadIgnoreFiles(rootPath: string, ignoreFiles: string[]): string
  */
 export function detectExtensions(
   dirPath: string, 
-  ignorePatterns: string[] = ['node_modules/', '.git/', 'dist/', 'build/'],
-  useIgnoreFiles: string[] = []
+  useIgnoreFiles: string[] = ['.gitignore', '.dockerignore', '.dryignore']
 ): string[] {
   const extensions = new Set<string>();
   const rootPath = path.resolve(dirPath);
   
-  const allIgnorePatterns = [...ignorePatterns];
-  if (useIgnoreFiles.length > 0) {
-    allIgnorePatterns.push(...loadIgnoreFiles(rootPath, useIgnoreFiles));
-  }
+  const allIgnorePatterns = loadIgnoreFiles(rootPath, useIgnoreFiles);
 
   function walk(currentPath: string) {
     if (!fs.existsSync(currentPath)) return;
@@ -205,7 +190,6 @@ export function detectExtensions(
       });
 
       if (isIgnored) continue;
-// ... (rest of walk)
 
       if (stat.isDirectory()) {
         walk(fullPath);
@@ -264,8 +248,7 @@ export function createConfigFile(configPath: string, extensions: string[]) {
     },
     scan: {
       extensions: extensions.length > 0 ? extensions : DEFAULT_CONFIG.scan?.extensions,
-      ignore: DEFAULT_CONFIG.scan?.ignore,
-      use_ignore_files: ['.gitignore', '.dockerignore'],
+      use_ignore_files: ['.gitignore', '.dockerignore', '.dryignore'],
       similarity: DEFAULT_CONFIG.scan?.similarity,
       languages: {},
     },
@@ -295,9 +278,6 @@ export function createConfigFile(configPath: string, extensions: string[]) {
   if (config.scan?.extensions) {
     lines.push(`extensions = ${formatTomlValue(config.scan.extensions)}`);
   }
-  if (config.scan?.ignore) {
-    lines.push(`ignore = ${formatTomlValue(config.scan.ignore, true)}`);
-  }
   if (config.scan?.use_ignore_files) {
     lines.push(`use_ignore_files = ${formatTomlValue(config.scan.use_ignore_files)}`);
   }
@@ -313,13 +293,16 @@ export function createConfigFile(configPath: string, extensions: string[]) {
   
   // Languages section
   if (config.scan?.languages && Object.keys(config.scan.languages).length > 0) {
-    lines.push('[scan.languages]');
     for (const [ext, patterns] of Object.entries(config.scan.languages)) {
-      lines.push(`${ext} = ${formatTomlValue(patterns, true)}`);
+      lines.push(`[scan.languages.${ext}]`);
+      lines.push(`include = ${formatTomlValue(patterns.include, true)}`);
+      if (patterns.exclude && patterns.exclude.length > 0) {
+        lines.push(`exclude = ${formatTomlValue(patterns.exclude, true)}`);
+      }
+      lines.push('');
     }
   }
   
   const content = lines.join('\n');
   fs.writeFileSync(configPath, content, 'utf-8');
 }
-

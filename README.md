@@ -214,8 +214,7 @@ url = "http://localhost:3000"
 
 [scan]
 extensions = ["ts", "tsx", "js", "jsx", "py", "go"]
-ignore = ["node_modules/", ".git/", "dist/", "build/"]
-use_ignore_files = [".gitignore", ".dockerignore"]
+use_ignore_files = [".gitignore", ".dockerignore", ".dryignore"]
 
 [scan.similarity]
 threshold = 0.8
@@ -243,7 +242,6 @@ go = [
 **Configuration options:**
 - `[server].url`: DRY server endpoint
 - `[scan].extensions`: File extensions to scan (without the dot)
-- `[scan].ignore`: List of glob patterns to ignore (directories should end with `/`)
 - `[scan].use_ignore_files`: List of files (like `.gitignore`) to load additional ignore patterns from
 - `[scan].similarity.threshold`: Default similarity threshold (0-1)
 - `[scan].similarity.limit`: Default limit for similar results
