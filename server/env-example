@@ -1,0 +1,14 @@
+# Server Configuration
+PORT=3000
+
+# Embedding API Configuration
+# Defaults to local EmbeddingGemma model via Docker Model Runner
+# Override with EMBEDDING_API_URL to use an external provider
+# EMBEDDING_API_URL=https://api.openai.com/v1/embeddings
+EMBEDDING_API_KEY=
+EMBEDDING_MODEL=text-embedding-3-small
+
+# Valkey/Redis Configuration
+# In docker-compose, use the service name 'valkey'
+VALKEY_URL=redis://valkey:6379
+

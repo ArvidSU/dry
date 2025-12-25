@@ -1,0 +1,47 @@
+# docker-compose.yml
+
+services:
+  # Valkey vector database
+  valkey:
+    image: valkey/valkey:latest
+    container_name: dry-valkey
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+    restart: always
+
+  # DRY Server
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: dry-server
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - VALKEY_URL=redis://valkey:6379
+      # Prefer the Compose-injected model URL; allow override via EMBEDDING_API_URL
+      # Server code has fallback to http://embeddinggemma:8080/v1/embeddings if both are unset
+      - EMBEDDING_API_URL=${EMBEDDING_API_URL:-${EMBEDDINGGEMMA_URL:-}}
+      # Prefer the Compose-injected model id; allow override via EMBEDDING_MODEL
+      # Server code has fallback to 'text-embedding-3-small' if both are unset
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-${EMBEDDINGGEMMA_MODEL:-}}
+      # Optional API key for external embedding providers
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-}
+    # Short syntax: bind the model name to this service
+    models:
+      - embeddinggemma
+    depends_on:
+      - valkey
+    restart: on-failure
+
+models:
+  # EmbeddingGemma embedding model
+  # Uses Docker Model Runner to provide OpenAI-compatible embedding API
+  embeddinggemma:
+    model: ai/embeddinggemma
+
+volumes:
+  valkey_data:

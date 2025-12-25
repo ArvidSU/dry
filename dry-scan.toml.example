@@ -1,0 +1,71 @@
+# DRY Scan Configuration Example
+
+[server]
+# The URL of the DRY server
+url = "http://localhost:3000"
+
+[scan]
+# File extensions to include in the scan
+extensions = ["ts", "tsx", "js", "jsx", "py", "go"]
+
+# Patterns to ignore during scanning (minimatch/glob style)
+# Directories should end with / or be followed by /**
+ignore = [
+  "node_modules/",
+  ".git/",
+  "dist/",
+  "build/",
+  "venv/",
+  "__pycache__/",
+  "*.test.ts",
+  "*.spec.ts"
+]
+
+# Files to load additional ignore patterns from (e.g., .gitignore, .dockerignore)
+use_ignore_files = [".gitignore", ".dockerignore"]
+
+[scan.similarity]
+# Default similarity threshold (0-1)
+threshold = 0.8
+# Default limit for similar pairs/results
+limit = 10
+
+[scan.languages]
+# Language-specific regex patterns for function extraction.
+# Each language (by extension) can have multiple regex patterns.
+# Capture groups: if the first capture group exists, it's used as the function name.
+
+ts = [
+  "\\bfunction\\s+(\\w+)\\s*\\(",                   # function name() { ... }
+  "\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>",   # const name = () => { ... }
+  "\\b(\\w+)\\s*:\\s*function\\s*\\("                # name: function() { ... }
+]
+
+tsx = [
+  "\\bfunction\\s+(\\w+)\\s*\\(",
+  "\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>",
+  "\\b(\\w+)\\s*:\\s*function\\s*\\("
+]
+
+js = [
+  "\\bfunction\\s+(\\w+)\\s*\\(",
+  "\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>",
+  "\\b(\\w+)\\s*:\\s*function\\s*\\("
+]
+
+jsx = [
+  "\\bfunction\\s+(\\w+)\\s*\\(",
+  "\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>",
+  "\\b(\\w+)\\s*:\\s*function\\s*\\("
+]
+
+py = [
+  "^\\s*def\\s+(\\w+)\\s*\\(",                      # def name(...):
+  "^\\s*async\\s+def\\s+(\\w+)\\s*\\("              # async def name(...):
+]
+
+go = [
+  "\\bfunc\\s+(\\w+)\\s*\\(",                       # func name(...) {
+  "\\bfunc\\s+\\([^)]+\\)\\s+(\\w+)\\s*\\("         # func (receiver) name(...) {
+]
+
