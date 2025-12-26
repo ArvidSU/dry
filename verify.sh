@@ -19,4 +19,8 @@ fi
 
 bun run src/cli.ts scan --init test_dir/
 
+echo "Testing semantic search..."
+# This should yield results if the fix is successful
+bun run src/cli.ts search "function"
+
 docker compose down

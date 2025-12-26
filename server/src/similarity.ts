@@ -1,4 +1,4 @@
-import { ElementData, EmbeddingIndex } from './types';
+import { ElementData, EmbeddingIndex, SearchResult } from './types';
 import { VectorDb } from './vector-db';
 
 /**
@@ -97,6 +97,26 @@ export class SimilarityService {
 
     // Sort by similarity (highest first) and limit results
     return pairs
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit);
+  }
+
+  /**
+   * Searches for elements similar to a given query embedding.
+   * @param queryEmbedding The embedding vector to search for
+   * @param threshold Minimum cosine similarity (0-1)
+   * @param limit Maximum number of results
+   * @returns Array of search results with similarity scores
+   */
+  async searchByVector(queryEmbedding: number[], threshold: number, limit: number): Promise<SearchResult[]> {
+    const allIndices = await this.vectorDb.getAllEmbeddings();
+    
+    return allIndices
+      .map(item => ({
+        element: item.elementData,
+        similarity: cosineSimilarity(queryEmbedding, item.embedding)
+      }))
+      .filter(item => item.similarity >= threshold)
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, limit);
   }

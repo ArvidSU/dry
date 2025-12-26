@@ -22,3 +22,8 @@ export interface Config {
   port: number;
 }
 
+export interface SearchResult {
+  element: ElementData;
+  similarity: number;
+}
+

@@ -108,6 +108,30 @@ export class App {
     });
 
     /**
+     * GET /search
+     * Semantic search for code elements.
+     */
+    this.app.get('/search', async (req, res) => {
+      try {
+        const query = req.query.q as string;
+        if (!query) {
+          return res.status(400).json({ error: 'Query parameter q is required' });
+        }
+
+        const threshold = parseFloat(req.query.threshold as string) || 0.8;
+        const limit = parseInt(req.query.limit as string) || 10;
+
+        const embedding = await this.embeddingService.createEmbedding(query);
+        const results = await this.similarityService.searchByVector(embedding, threshold, limit);
+        
+        res.json({ results });
+      } catch (error: any) {
+        console.error('Error during semantic search:', error);
+        res.status(500).json({ error: error.message || 'Internal server error' });
+      }
+    });
+
+    /**
      * GET /health
      * Basic health check endpoint.
      */

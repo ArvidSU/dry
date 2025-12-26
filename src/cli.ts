@@ -329,5 +329,48 @@ program
     }
   });
 
+program
+  .command('search')
+  .description('Perform a semantic search for code elements')
+  .argument('<query...>', 'Search query string')
+  .option('-t, --threshold <threshold>', 'Similarity threshold (0-1)')
+  .option('-l, --limit <limit>', 'Maximum number of results')
+  .option('-u, --url <url>', 'DRY server URL (overrides config)')
+  .action(async (queryParts, options) => {
+    try {
+      const query = queryParts.join(' ');
+      const config = resolveConfig(process.cwd(), options);
+      const serverUrl = config.server?.url || 'http://localhost:3000';
+      // Default threshold for semantic search is lower than for code similarity (0.5 vs 0.8)
+      const threshold = parseFloat(options.threshold || '0.5');
+      const limit = parseInt(options.limit || config.scan?.similarity?.limit?.toString() || '10');
+
+      const client = new DryClient(serverUrl);
+      
+      console.log(`Using server: ${serverUrl}`);
+      console.log(`Searching for: "${query}" (threshold: ${threshold}, limit: ${limit})...`);
+      
+      const results = await client.search(query, threshold, limit);
+      
+      if (results.length === 0) {
+        console.log('No matching elements found.');
+        return;
+      }
+
+      console.log(`\nFound ${results.length} results:`);
+      results.forEach((result, index) => {
+        const { element, similarity } = result;
+        console.log(`\n${index + 1}. ${element.metadata.elementName} (Similarity: ${(similarity * 100).toFixed(1)}%)`);
+        console.log(`   File: ${element.metadata.filePath}:${element.metadata.lineNumber}`);
+        console.log(`   ---`);
+        console.log(element.elementString.split('\n').slice(0, 5).join('\n'));
+        if (element.elementString.split('\n').length > 5) console.log('   ...');
+      });
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
 program.parse();
 

@@ -1,5 +1,5 @@
 import { fetch } from 'undici';
-import { ElementData, SubmitElementResponse, SimilarElementsResponse, SimilarPairsResponse, SimilarPair } from './types';
+import { ElementData, SubmitElementResponse, SimilarElementsResponse, SimilarPairsResponse, SimilarPair, SearchResult, SearchResponse } from './types';
 
 export class DryClient {
   private serverUrl: string;
@@ -95,6 +95,31 @@ export class DryClient {
 
     const data = (await response.json()) as SimilarPairsResponse;
     return data.pairs;
+  }
+
+  /**
+   * Performs a semantic search for code elements.
+   * @param query The search query string
+   * @param threshold Cosine similarity threshold (0-1)
+   * @param limit Maximum number of results to return
+   * @returns Array of search results with similarity scores
+   */
+  async search(query: string, threshold: number = 0.8, limit: number = 10): Promise<SearchResult[]> {
+    const params = new URLSearchParams({
+      q: query,
+      threshold: threshold.toString(),
+      limit: limit.toString(),
+    });
+
+    const response = await fetch(`${this.serverUrl}/search?${params.toString()}`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to perform semantic search (${response.status}): ${errorText}`);
+    }
+
+    const data = (await response.json()) as SearchResponse;
+    return data.results;
   }
 }
 

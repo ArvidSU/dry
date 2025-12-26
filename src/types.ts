@@ -33,3 +33,12 @@ export interface SimilarPairsResponse {
   pairs: SimilarPair[];
 }
 
+export interface SearchResult {
+  element: ElementData;
+  similarity: number;
+}
+
+export interface SearchResponse {
+  results: SearchResult[];
+}
+
