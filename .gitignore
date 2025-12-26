@@ -69,3 +69,4 @@ playwright-report/
 # TypeScript
 *.tsbuildinfo
 
+test_dir/dry-scan.toml

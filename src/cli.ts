@@ -37,7 +37,7 @@ program
   .description('Scan a file or directory for elements and index them')
   .argument('<path>', 'File or directory to scan')
   .option('-r, --regex <regex>', 'Regex to match element signatures (overrides config)')
-  .option('-e, --extensions <exts>', 'Comma-separated file extensions to scan (overrides config)')
+  .option('--init', 'Initialize a new dry-scan.toml file')
   .option('-u, --url <url>', 'DRY server URL (overrides config)')
   .option('--list-similar', 'List the most similar functions after scanning', true)
   .option('--limit <limit>', 'Maximum number of similar pairs to list', '10')
@@ -51,7 +51,7 @@ program
         const detected = detectExtensions(resolvedPath);
         if (detected.length > 0) {
           console.log(`No dry-scan.toml found. Detected potential source extensions: ${detected.join(', ')}`);
-          const shouldCreate = await askYesNo('Would you like to create a dry-scan.toml with these extensions?');
+          const shouldCreate = options.init || await askYesNo('Would you like to create a dry-scan.toml with these extensions?');
           if (shouldCreate) {
             configPath = path.join(resolvedPath, 'dry-scan.toml');
             createConfigFile(configPath, detected);
@@ -63,8 +63,8 @@ program
       const config = resolveConfig(resolvedPath, options);
       
       const serverUrl = config.server?.url || 'http://localhost:3000';
-      const languages = config.scan?.languages || {};
-      const extensions = config.scan?.extensions || Object.keys(languages);
+      const patterns = config.scan?.patterns || [];
+      const extensions = config.scan?.extensions || Array.from(new Set(patterns.flatMap(p => p.extensions)));
       const useIgnoreFiles = config.scan?.use_ignore_files || ['.gitignore', '.dockerignore', '.dryignore'];
 
       const rootPathForIgnore = fs.statSync(resolvedPath).isDirectory() ? resolvedPath : path.dirname(resolvedPath);
@@ -106,14 +106,17 @@ program
         
         if (options.regex) {
           includePatterns = [new RegExp(options.regex, 'g')];
-        } else if (languages[ext]) {
-          includePatterns = languages[ext].include.map(p => new RegExp(p, 'g'));
-          if (languages[ext].exclude) {
-            excludePatterns = languages[ext].exclude!.map(p => new RegExp(p, 'g'));
-          }
         } else {
-          // Fallback to default regex if no language specific one is found
-          includePatterns = [/\bfunction\s+(\w+)\s*\(/g];
+          const matchingGroup = patterns.find(p => p.extensions.includes(ext));
+          if (matchingGroup) {
+            includePatterns = matchingGroup.include.map(p => new RegExp(p, 'g'));
+            if (matchingGroup.exclude) {
+              excludePatterns = matchingGroup.exclude.map(p => new RegExp(p, 'g'));
+            }
+          } else {
+            // Fallback to default regex if no language specific one is found
+            includePatterns = [/\bfunction\s+(\w+)\s*\(/g];
+          }
         }
 
         const elements = extractElements(filePath, includePatterns, excludePatterns);

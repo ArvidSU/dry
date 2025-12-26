@@ -220,20 +220,27 @@ use_ignore_files = [".gitignore", ".dockerignore", ".dryignore"]
 threshold = 0.8
 limit = 10
 
-[scan.languages]
+[[scan.patterns]]
 # Language-specific regex patterns for element extraction
-# Each language (by extension) can have multiple regex patterns
+# Each group can apply to multiple extensions
 # If the first capture group exists, it's used as the element name
-ts = [
+extensions = ["ts", "tsx", "js", "jsx"]
+include = [
   "\\bfunction\\s+(\\w+)\\s*\\(",                   # function name() { ... }
   "\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>",   # const name = () => { ... }
   "\\b(\\w+)\\s*:\\s*function\\s*\\("                # name: function() { ... }
 ]
-py = [
+
+[[scan.patterns]]
+extensions = ["py"]
+include = [
   "^\\s*def\\s+(\\w+)\\s*\\(",                      # def name(...):
   "^\\s*async\\s+def\\s+(\\w+)\\s*\\("              # async def name(...):
 ]
-go = [
+
+[[scan.patterns]]
+extensions = ["go"]
+include = [
   "\\bfunc\\s+(\\w+)\\s*\\(",                       # func name(...) {
   "\\bfunc\\s+\\([^)]+\\)\\s+(\\w+)\\s*\\("         # func (receiver) name(...) {
 ]
@@ -245,4 +252,4 @@ go = [
 - `[scan].use_ignore_files`: List of files (like `.gitignore`) to load additional ignore patterns from
 - `[scan].similarity.threshold`: Default similarity threshold (0-1)
 - `[scan].similarity.limit`: Default limit for similar results
-- `[scan].languages`: Language-specific regex patterns for element extraction, keyed by file extension
+- `[[scan.patterns]]`: List of syntax pattern groups (each with `extensions`, `include`, and optional `exclude`)

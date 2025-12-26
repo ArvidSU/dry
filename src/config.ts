@@ -3,13 +3,10 @@ import path from 'path';
 import * as TOML from '@iarna/toml';
 import { minimatch } from 'minimatch';
 
-export interface LanguagePatterns {
+export interface SyntaxPatternGroup {
+  extensions: string[];
   include: string[];
   exclude?: string[];
-}
-
-export interface LanguageConfig {
-  [extension: string]: LanguagePatterns;
 }
 
 export interface SimilarityConfig {
@@ -25,7 +22,7 @@ export interface ScanConfig {
     extensions?: string[];
     use_ignore_files?: string[];
     similarity?: SimilarityConfig;
-    languages?: LanguageConfig;
+    patterns?: SyntaxPatternGroup[];
   };
 }
 
@@ -34,26 +31,23 @@ export const DEFAULT_CONFIG: ScanConfig = {
     url: 'http://localhost:3000',
   },
   scan: {
-    extensions: ['ts', 'tsx', 'js', 'jsx'],
     use_ignore_files: ['.gitignore', '.dockerignore', '.dryignore'],
     similarity: {
       threshold: 0.8,
       limit: 10,
     },
-    languages: {
-      ts: {
-        include: ['\\bfunction\\s+(\\w+)\\s*\\(', '\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>', '\\b(\\w+)\\s*:\\s*function\\s*\\('],
+    patterns: [
+      {
+        extensions: ['ts', 'tsx', 'js', 'jsx'],
+        include: [
+          'function\\s+(\\w+)\\s*\\(',
+          'const\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>',
+          '(\\w+):\\s*function\\s*\\(',
+          'if\\s*\\([^)]*\\)\\s*{',
+          'for\\s*\\([^)]*\\)\\s*{',
+        ],
       },
-      tsx: {
-        include: ['\\bfunction\\s+(\\w+)\\s*\\(', '\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>', '\\b(\\w+)\\s*:\\s*function\\s*\\('],
-      },
-      js: {
-        include: ['\\bfunction\\s+(\\w+)\\s*\\(', '\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>', '\\b(\\w+)\\s*:\\s*function\\s*\\('],
-      },
-      jsx: {
-        include: ['\\bfunction\\s+(\\w+)\\s*\\(', '\\bconst\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>', '\\b(\\w+)\\s*:\\s*function\\s*\\('],
-      },
-    },
+    ],
   },
 };
 
@@ -206,7 +200,7 @@ export function detectExtensions(
   walk(rootPath);
   
   // Filter to keep only extensions that are either in our default config or likely source files
-  const supportedExtensions = Object.keys(DEFAULT_CONFIG.scan?.languages || {});
+  const supportedExtensions = (DEFAULT_CONFIG.scan?.patterns || []).flatMap(p => p.extensions);
   const detected = Array.from(extensions);
   
   // Prioritize supported ones, but allow others if they look like source code
@@ -227,13 +221,19 @@ function formatTomlValue(value: any, forceMultiline: boolean = false): string {
     // For short arrays of simple values, use inline format
     const allSimple = value.every(v => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean');
     if (!forceMultiline && allSimple && value.length <= 2 && value.every(v => typeof v !== 'string' || v.length < 10)) {
-      return `[${value.map(v => typeof v === 'string' ? `"${v.replace(/"/g, '\\"')}"` : v).join(', ')}]`;
+      return `[${value.map(v => formatTomlValue(v)).join(', ')}]`;
     }
     // Multi-line array
-    return `[\n${value.map(v => `  ${typeof v === 'string' ? `"${v.replace(/"/g, '\\"')}"` : v}`).join(',\n')}\n]`;
+    return `[\n${value.map(v => `  ${formatTomlValue(v)}`).join(',\n')}\n]`;
   }
   if (typeof value === 'string') {
-    return `"${value.replace(/"/g, '\\"')}"`;
+    // Use single quotes (literal strings) for strings that don't contain single quotes.
+    // This is much safer for regex as it doesn't require backslash escaping.
+    if (!value.includes("'")) {
+      return `'${value}'`;
+    }
+    // Fallback to double quotes and escape backslashes and double quotes if single quotes are present
+    return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   }
   return String(value);
 }
@@ -250,15 +250,18 @@ export function createConfigFile(configPath: string, extensions: string[]) {
       extensions: extensions.length > 0 ? extensions : DEFAULT_CONFIG.scan?.extensions,
       use_ignore_files: ['.gitignore', '.dockerignore', '.dryignore'],
       similarity: DEFAULT_CONFIG.scan?.similarity,
-      languages: {},
+      patterns: [],
     },
   };
 
-  // Add language mappings for detected extensions if we have defaults for them
-  if (config.scan && config.scan.languages) {
+  // Add pattern groups that match detected extensions
+  if (config.scan && config.scan.patterns && DEFAULT_CONFIG.scan?.patterns) {
+    const addedPatterns = new Set<SyntaxPatternGroup>();
     for (const ext of extensions) {
-      if (DEFAULT_CONFIG.scan?.languages?.[ext]) {
-        config.scan.languages[ext] = DEFAULT_CONFIG.scan.languages[ext];
+      const group = DEFAULT_CONFIG.scan.patterns.find(p => p.extensions.includes(ext));
+      if (group && !addedPatterns.has(group)) {
+        config.scan.patterns.push(group);
+        addedPatterns.add(group);
       }
     }
   }
@@ -269,7 +272,7 @@ export function createConfigFile(configPath: string, extensions: string[]) {
   // Server section
   lines.push('[server]');
   if (config.server?.url) {
-    lines.push(`url = "${config.server.url}"`);
+    lines.push(`url = ${formatTomlValue(config.server.url)}`);
   }
   lines.push('');
   
@@ -291,13 +294,16 @@ export function createConfigFile(configPath: string, extensions: string[]) {
     lines.push('');
   }
   
-  // Languages section
-  if (config.scan?.languages && Object.keys(config.scan.languages).length > 0) {
-    for (const [ext, patterns] of Object.entries(config.scan.languages)) {
-      lines.push(`[scan.languages.${ext}]`);
-      lines.push(`include = ${formatTomlValue(patterns.include, true)}`);
-      if (patterns.exclude && patterns.exclude.length > 0) {
-        lines.push(`exclude = ${formatTomlValue(patterns.exclude, true)}`);
+  // Patterns section
+  if (config.scan?.patterns && config.scan.patterns.length > 0) {
+    lines.push('[[scan.patterns]]');
+    for (let i = 0; i < config.scan.patterns.length; i++) {
+      const group = config.scan.patterns[i];
+      if (i > 0) lines.push('[[scan.patterns]]');
+      lines.push(`extensions = ${formatTomlValue(group.extensions)}`);
+      lines.push(`include = ${formatTomlValue(group.include, true)}`);
+      if (group.exclude && group.exclude.length > 0) {
+        lines.push(`exclude = ${formatTomlValue(group.exclude, true)}`);
       }
       lines.push('');
     }
