@@ -206,6 +206,88 @@ function getAllFiles(dirPath: string, extensions: string[], ignorePatterns: stri
 }
 
 program
+  .command('discover')
+  .description('Discover file extensions in a directory and show excluded directories')
+  .argument('[path]', 'Directory to scan (defaults to current directory)', process.cwd())
+  .option('--ignore-files <files>', 'Comma-separated list of ignore files to use', '.gitignore,.dockerignore,.dryignore')
+  .action(async (discoverPath, options) => {
+    try {
+      const resolvedPath = path.resolve(discoverPath);
+      
+      if (!fs.existsSync(resolvedPath)) {
+        throw new Error(`Path does not exist: ${resolvedPath}`);
+      }
+      
+      const stats = fs.statSync(resolvedPath);
+      if (!stats.isDirectory()) {
+        throw new Error(`Path is not a directory: ${resolvedPath}`);
+      }
+
+      const ignoreFiles = options.ignoreFiles 
+        ? options.ignoreFiles.split(',').map((f: string) => f.trim())
+        : ['.gitignore', '.dockerignore', '.dryignore'];
+
+      // Discover extensions
+      const discoveredExtensions = detectExtensions(resolvedPath, ignoreFiles);
+      
+      // Get excluded directories from ignore patterns
+      const ignorePatterns = loadIgnoreFiles(resolvedPath, ignoreFiles);
+      const excludedDirs = new Set<string>();
+      
+      for (const pattern of ignorePatterns) {
+        let dirName: string | null = null;
+        
+        // Patterns ending with / are directories
+        if (pattern.endsWith('/')) {
+          dirName = pattern.slice(0, -1);
+        } else if (pattern.startsWith('/')) {
+          // Absolute patterns like "/dist" or "/node_modules"
+          dirName = pattern.slice(1);
+        } else if (pattern.includes('**/')) {
+          // Patterns like "**/node_modules/**" or "**/dist"
+          const match = pattern.match(/\*\*\/([^/*?]+)/);
+          if (match && match[1]) {
+            dirName = match[1];
+          }
+        } else if (!pattern.includes('*') && !pattern.includes('?') && !pattern.includes('/')) {
+          // Simple patterns without wildcards or slashes (likely directories)
+          // Only if they don't look like file extensions
+          if (!pattern.includes('.')) {
+            dirName = pattern;
+          }
+        } else if (pattern.includes('/') && !pattern.includes('*') && !pattern.includes('?')) {
+          // Patterns like "server/dist" - extract the last directory component
+          const parts = pattern.split('/').filter(p => p && !p.includes('.'));
+          if (parts.length > 0) {
+            dirName = parts[parts.length - 1];
+          }
+        }
+        
+        // Only add if it looks like a directory name (no dots, reasonable length)
+        if (dirName && !dirName.includes('.') && dirName.length > 0 && dirName.length < 50) {
+          excludedDirs.add(dirName);
+        }
+      }
+
+      // Format output
+      const extensionsStr = discoveredExtensions.length > 0
+        ? discoveredExtensions.map(ext => `'${ext}'`).join(', ')
+        : '(none)';
+      
+      const excludedDirsArray = Array.from(excludedDirs).sort();
+      const excludedDirsStr = excludedDirsArray.length > 0
+        ? excludedDirsArray.map(dir => `'${dir}'`).join(', ')
+        : '(none)';
+
+      console.log(`DISCOVERED EXTENSIONS: ${extensionsStr}`);
+      console.log(`EXCLUDED DIRECTORIES: ${excludedDirsStr}`);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program
   .command('similar')
   .description('Find elements similar to a given element ID')
   .argument('<id>', 'Element ID')
