@@ -335,13 +335,11 @@ program
 
 program
   .command('similar')
-  .description('Find elements similar to a given element ID')
-  .argument('<id>', 'Element ID')
+  .description('Find the most similar element pairs across all indexed elements')
   .option('-t, --threshold <threshold>', 'Similarity threshold (0-1)')
   .option('-l, --limit <limit>', 'Maximum number of results')
   .option('--on-exceed <action>', 'Action when similar matches exceed limit ("warn" or "fail")')
-  .option('-u, --url <url>', 'DRY server URL (overrides config)')
-  .action(async (id, options) => {
+  .action(async (options) => {
     try {
       const config = resolveConfig(process.cwd(), options);
       const serverUrl = config.server?.url || 'http://localhost:3000';
@@ -352,27 +350,34 @@ program
       const client = new DryClient(serverUrl);
       
       console.log(`Using server: ${serverUrl}`);
-      console.log(`Finding elements similar to ${id} (threshold: ${threshold}, limit: ${limit})...`);
+      console.log(`Finding most similar pairs (threshold: ${threshold}, limit: ${limit})...`);
       
       // Fetch limit + 1 to detect if the limit is exceeded
-      const similar = await client.findSimilar(id, threshold, limit + 1);
+      const pairs = await client.findMostSimilarPairs(threshold, limit + 1);
       
-      if (similar.length === 0) {
-        console.log('No similar elements found.');
+      if (pairs.length === 0) {
+        console.log('No similar element pairs found.');
         return;
       }
 
-      const resultsToShow = similar.slice(0, limit);
-      console.log(`Found ${similar.length > limit ? 'more than ' : ''}${resultsToShow.length} similar elements:`);
-      resultsToShow.forEach((element, index) => {
-        console.log(`\n${index + 1}. ${element.metadata.elementName}`);
-        console.log(`   File: ${element.metadata.filePath}:${element.metadata.lineNumber}`);
+      const resultsToShow = pairs.slice(0, limit);
+      console.log(`Found ${pairs.length > limit ? 'more than ' : ''}${resultsToShow.length} similar element pairs:`);
+      resultsToShow.forEach((pair, index) => {
+        const { element1, element2, similarity } = pair;
+        console.log(`\n${index + 1}. Similarity: ${(similarity * 100).toFixed(1)}%`);
+        console.log(`   Element 1: ${element1.metadata.elementName} (${element1.metadata.filePath}:${element1.metadata.lineNumber})`);
+        console.log(`   Element 2: ${element2.metadata.elementName} (${element2.metadata.filePath}:${element2.metadata.lineNumber})`);
         console.log(`   ---`);
-        console.log(element.elementString.split('\n').slice(0, 5).join('\n'));
-        if (element.elementString.split('\n').length > 5) console.log('   ...');
+        // Show snippet of both? Or just one? Let's show a snippet of both to compare.
+        console.log(`   Element 1 Snippet:`);
+        console.log(element1.elementString.split('\n').slice(0, 3).join('\n'));
+        if (element1.elementString.split('\n').length > 3) console.log('   ...');
+        console.log(`   Element 2 Snippet:`);
+        console.log(element2.elementString.split('\n').slice(0, 3).join('\n'));
+        if (element2.elementString.split('\n').length > 3) console.log('   ...');
       });
 
-      handleExceed(similar.length, limit, onExceed as 'warn' | 'fail');
+      handleExceed(pairs.length, limit, onExceed as 'warn' | 'fail');
     } catch (error: any) {
       console.error(`Error: ${error.message}`);
       process.exit(1);
