@@ -4,7 +4,8 @@ import { extractElements } from './extract';
 import { DryClient } from './client';
 import path from 'path';
 import fs from 'fs';
-import { spawnSync } from 'child_process';
+import { xxHash32 } from 'js-xxhash';
+import { spawn } from 'child_process';
 import { resolveConfig, findConfigFile, detectExtensions, createConfigFile, loadIgnoreFiles, ScanConfig } from './config';
 import { getCommitHash } from './git';
 import { minimatch } from 'minimatch';
@@ -51,6 +52,24 @@ async function askYesNo(question: string): Promise<boolean> {
       resolve(answer.toLowerCase() === 'y');
     });
   });
+}
+
+/**
+ * Runs tasks in parallel with a concurrency limit.
+ */
+async function limitConcurrency<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
+  const results = new Array(tasks.length);
+  const queue = tasks.map((task, i) => ({ task, i }));
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+    while (queue.length > 0) {
+      const item = queue.shift();
+      if (!item) break;
+      const { task, i } = item;
+      results[i] = await task();
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 /**
@@ -145,7 +164,6 @@ program
       
       const client = new DryClient(serverUrl);
 
-      logger.info(`Using server: ${serverUrl}`);
       if (options.wipe !== false) {
         logger.info('Wiping previous scans...');
         const deletedCount = await client.wipeAllElements();
@@ -176,10 +194,13 @@ program
 
       if (filesToScan.length > 0) {
         logger.info(`Found ${filesToScan.length} files to scan in this directory.`);
-        let totalElements = 0;
-
-        for (const filePath of filesToScan) {
+        
+        // Step 1: Extract elements from all files in parallel
+        const elementExtractionTasks = filesToScan.map(filePath => async () => {
           logger.verbose(`Scanning ${path.relative(process.cwd(), filePath)}...`);
+          
+          const content = fs.readFileSync(filePath, 'utf-8');
+          const fileHash = xxHash32(content).toString(16);
           
           const ext = path.extname(filePath).toLowerCase().slice(1);
           let includePatterns: RegExp[] = [];
@@ -204,29 +225,47 @@ program
             }
           }
 
-          const elements = extractElements(filePath, includePatterns, excludePatterns, minLength, commitHash || undefined);
-          
-          if (elements.length === 0) continue;
+          return extractElements(filePath, includePatterns, excludePatterns, minLength, commitHash || undefined, fileHash);
+        });
 
-          logger.verbose(`  Found ${elements.length} elements. Submitting...`);
-          for (const element of elements) {
-            try {
-              const id = await client.submitElement(element);
-              logger.debug(`  Indexed: ${element.metadata.elementName} (ID: ${id})`);
-              totalElements++;
-            } catch (error: any) {
-              logger.error(`  Failed to index ${element.metadata.elementName}: ${error.message}`);
-            }
-          }
-        }
+        const allElementsResults = await limitConcurrency(elementExtractionTasks, 10);
+        const allElements = allElementsResults.flat();
         
-        logger.success(`Done indexing current directory. Indexed ${totalElements} elements from ${filesToScan.length} files.`);
+        if (allElements.length > 0) {
+          logger.info(`Extracted ${allElements.length} elements. Submitting in batches...`);
+          
+          // Step 2: Submit elements in batches
+          const batchSize = 50;
+          const batches = [];
+          for (let i = 0; i < allElements.length; i += batchSize) {
+            batches.push(allElements.slice(i, i + batchSize));
+          }
+
+          const submissionTasks = batches.map(batch => async () => {
+            try {
+              const ids = await client.submitElements(batch);
+              logger.debug(`  Indexed batch of ${batch.length} elements.`);
+              return ids.length;
+            } catch (error: any) {
+              logger.error(`  Failed to submit batch: ${error.message}`);
+              return 0;
+            }
+          });
+
+          const results = await limitConcurrency(submissionTasks, 5);
+          const totalIndexed = results.reduce((sum, count) => sum + count, 0);
+          
+          logger.success(`Done indexing current directory. Indexed ${totalIndexed} elements from ${filesToScan.length} files.`);
+        } else {
+          logger.info('No elements found in files.');
+        }
       }
 
       // Handle sub-scans
       if (subScans.length > 0) {
-        logger.info(`Found ${subScans.length} directories with their own dry-scan.toml. Spawning sub-scans...`);
-        for (const subPath of subScans) {
+        logger.info(`Found ${subScans.length} directories with their own dry-scan.toml. Spawning sub-scans in parallel...`);
+        
+        const subScanTasks = subScans.map(subPath => async () => {
           logger.info(`\n--- Spawning sub-scan for ${path.relative(process.cwd(), subPath)} ---`);
           
           const args = ['scan', subPath, '--no-wipe'];
@@ -240,11 +279,21 @@ program
           if (program.opts().silent) args.push('--silent');
           if (program.opts().debug) args.push('--debug');
           
-          const result = spawnSync(process.argv[0], [process.argv[1], ...args], { stdio: 'inherit' });
-          if (result.status !== 0) {
-            logger.error(`Sub-scan for ${subPath} failed with exit code ${result.status}`);
-            process.exit(result.status ?? 1);
-          }
+          return new Promise<number>((resolve) => {
+            const child = spawn(process.argv[0], [process.argv[1], ...args], { stdio: 'inherit' });
+            child.on('close', (code) => {
+              if (code !== 0) {
+                logger.error(`Sub-scan for ${subPath} failed with exit code ${code}`);
+              }
+              resolve(code ?? 1);
+            });
+          });
+        });
+
+        const codes = await Promise.all(subScanTasks.map(t => t()));
+        const failedCode = codes.find(code => code !== 0);
+        if (failedCode !== undefined) {
+          process.exit(failedCode);
         }
       }
     } catch (error: any) {
@@ -403,7 +452,6 @@ program
 
       const client = new DryClient(serverUrl);
       
-      logger.info(`Using server: ${serverUrl}`);
       logger.info(`Finding most similar pairs (threshold: ${threshold}, limit: ${limit})...`);
       
       // Fetch limit + 1 to detect if the limit is exceeded
@@ -458,7 +506,6 @@ program
 
       const client = new DryClient(serverUrl);
       
-      logger.info(`Using server: ${serverUrl}`);
       logger.info(`Searching for: "${query}" (threshold: ${threshold}, limit: ${limit})...`);
       
       const results = await client.search(query, threshold, limit);

@@ -2,11 +2,17 @@ export interface ElementMetadata {
   filePath: string;
   lineNumber: number;
   elementName: string;
+  commitHash?: string;
+  fileHash?: string;
 }
 
 export interface ElementData {
   metadata: ElementMetadata;
   elementString: string;
+}
+
+export interface SubmitBatchResponse {
+  ids: string[];
 }
 
 export interface EmbeddingIndex {

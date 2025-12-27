@@ -22,6 +22,22 @@ export class VectorDb {
   }
 
   /**
+   * Stores multiple embeddings and their metadata in Valkey using a pipeline.
+   * @param indices Array of embedding indices to store
+   */
+  async storeEmbeddings(indices: EmbeddingIndex[]): Promise<void> {
+    const pipeline = this.redis.pipeline();
+    for (const index of indices) {
+      pipeline.hset(`element:${index.id}`, {
+        data: JSON.stringify(index.elementData),
+        embedding: JSON.stringify(index.embedding),
+      });
+      pipeline.sadd('elements:ids', index.id);
+    }
+    await pipeline.exec();
+  }
+
+  /**
    * Retrieves an embedding index by its ID.
    * @param id The element ID
    * @returns The embedding index or null if not found
@@ -87,6 +103,51 @@ export class VectorDb {
 
     await pipeline.exec();
     return ids.length;
+  }
+
+  /**
+   * Retrieves multiple cached embeddings in a single batch.
+   */
+  async getBatchCachedEmbeddings(keys: { fileHash: string, elementName: string, lineNumber: number }[]): Promise<(number[] | null)[]> {
+    if (keys.length === 0) return [];
+    
+    const redisKeys = keys.map(k => `embedding_cache:${k.fileHash}:${k.elementName}:${k.lineNumber}`);
+    const results = await this.redis.mget(...redisKeys);
+    
+    return results.map((r: string | null) => r ? JSON.parse(r) : null);
+  }
+
+  /**
+   * Caches multiple embeddings in a single batch using a pipeline.
+   * Cache expires in 7 days.
+   */
+  async cacheEmbeddings(entries: { fileHash: string, elementName: string, lineNumber: number, embedding: number[] }[]): Promise<void> {
+    if (entries.length === 0) return;
+
+    const pipeline = this.redis.pipeline();
+    for (const entry of entries) {
+      const key = `embedding_cache:${entry.fileHash}:${entry.elementName}:${entry.lineNumber}`;
+      pipeline.set(key, JSON.stringify(entry.embedding), 'EX', 60 * 60 * 24 * 7);
+    }
+    await pipeline.exec();
+  }
+
+  /**
+   * Retrieves a cached embedding for a given file hash, element name, and line number.
+   */
+  async getCachedEmbedding(fileHash: string, elementName: string, lineNumber: number): Promise<number[] | null> {
+    const key = `embedding_cache:${fileHash}:${elementName}:${lineNumber}`;
+    const cached = await this.redis.get(key);
+    return cached ? JSON.parse(cached) : null;
+  }
+
+  /**
+   * Caches an embedding for a given file hash, element name, and line number.
+   * Cache expires in 7 days.
+   */
+  async cacheEmbedding(fileHash: string, elementName: string, lineNumber: number, embedding: number[]): Promise<void> {
+    const key = `embedding_cache:${fileHash}:${elementName}:${lineNumber}`;
+    await this.redis.set(key, JSON.stringify(embedding), 'EX', 60 * 60 * 24 * 7);
   }
 }
 

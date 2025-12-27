@@ -19,31 +19,39 @@ export class EmbeddingService {
     const embeddings: number[][] = [];
 
     for (const chunk of chunks) {
-      const response = await fetch(this.config.embeddingApiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.config.embeddingApiKey ? { 'Authorization': `Bearer ${this.config.embeddingApiKey}` } : {}),
-        },
-        body: JSON.stringify({
-          input: chunk,
-          // Check EMBEDDING_MODEL first (manual override), then EMBEDDINGGEMMA_MODEL (Compose-injected), then default
-          model: process.env.EMBEDDING_MODEL || process.env.EMBEDDINGGEMMA_MODEL || 'text-embedding-3-small',
-        }),
-      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Embedding API error (${response.status}): ${errorText}`);
+      try {
+        const response = await fetch(this.config.embeddingApiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(this.config.embeddingApiKey ? { 'Authorization': `Bearer ${this.config.embeddingApiKey}` } : {}),
+          },
+          body: JSON.stringify({
+            input: chunk,
+            // Check EMBEDDING_MODEL first (manual override), then EMBEDDINGGEMMA_MODEL (Compose-injected), then default
+            model: process.env.EMBEDDING_MODEL || process.env.EMBEDDINGGEMMA_MODEL || 'text-embedding-3-small',
+          }),
+          signal: controller.signal as any,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Embedding API error (${response.status}): ${errorText}`);
+        }
+
+        const data = (await response.json()) as any;
+        
+        if (!data.data || !Array.isArray(data.data) || data.data.length === 0) {
+          throw new Error('Invalid response format from embedding API');
+        }
+
+        embeddings.push(data.data[0].embedding);
+      } finally {
+        clearTimeout(timeout);
       }
-
-      const data = (await response.json()) as any;
-      
-      if (!data.data || !Array.isArray(data.data) || data.data.length === 0) {
-        throw new Error('Invalid response format from embedding API');
-      }
-
-      embeddings.push(data.data[0].embedding);
     }
     
     if (embeddings.length === 1) {
@@ -54,11 +62,38 @@ export class EmbeddingService {
   }
 
   /**
+   * Creates embeddings for multiple texts in parallel.
+   * @param texts Array of element strings to embed
+   * @returns Array of embedding vectors
+   */
+  async createEmbeddings(texts: string[]): Promise<number[][]> {
+    if (!this.config.embeddingApiUrl) {
+      throw new Error('EMBEDDING_API_URL is not configured');
+    }
+
+    // Process texts with limited concurrency to avoid overloading the API or hitting pool limits.
+    const concurrencyLimit = 5;
+    const results: number[][] = new Array(texts.length);
+    const queue = texts.map((text, index) => ({ text, index }));
+    
+    const workers = Array.from({ length: Math.min(concurrencyLimit, texts.length) }, async () => {
+      while (queue.length > 0) {
+        const item = queue.shift();
+        if (!item) break;
+        results[item.index] = await this.createEmbedding(item.text);
+      }
+    });
+
+    await Promise.all(workers);
+    return results;
+  }
+
+  /**
    * Splits a string into chunks based on the configured chunk size.
    * Tries to split at line breaks to preserve context.
    */
   private splitIntoChunks(text: string): string[] {
-    const limit = this.config.embeddingChunkSize;
+    const limit = Math.max(100, this.config.embeddingChunkSize || 1000);
     if (text.length <= limit) {
       return [text];
     }

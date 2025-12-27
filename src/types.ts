@@ -3,6 +3,7 @@ export interface ElementMetadata {
   lineNumber: number;
   elementName: string;
   commitHash?: string;
+  fileHash?: string;
 }
 
 export interface ElementData {
@@ -18,6 +19,10 @@ export interface EmbeddingIndex {
 
 export interface SubmitElementResponse {
   id: string;
+}
+
+export interface SubmitBatchResponse {
+  ids: string[];
 }
 
 export interface SimilarElementsResponse {
