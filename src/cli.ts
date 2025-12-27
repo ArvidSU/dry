@@ -52,13 +52,7 @@ program
   .argument('<path>', 'File or directory to scan')
   .option('-r, --regex <regex>', 'Regex to match element signatures (overrides config)')
   .option('--init', 'Initialize a new dry-scan.toml file')
-  .option('-u, --url <url>', 'DRY server URL (overrides config)')
   .option('--no-wipe', 'Do not wipe previous scans before indexing')
-  .option('--list-similar', 'List the most similar functions after scanning')
-  .option('--no-list-similar', 'Do not list similar functions after scanning')
-  .option('--limit <limit>', 'Maximum number of similar pairs to list')
-  .option('--threshold <threshold>', 'Similarity threshold for listing similar functions (0-1)')
-  .option('--on-exceed <action>', 'Action when similar matches exceed limit ("warn" or "fail")')
   .action(async (scanPath, options) => {
     try {
       const resolvedPath = path.resolve(scanPath);
@@ -193,25 +187,8 @@ program
           const args = ['scan', subPath, '--no-wipe'];
           
           // Only pass through flags that were explicitly provided by the user
-          if (process.argv.includes('--url') || process.argv.includes('-u')) {
-            args.push('--url', options.url);
-          }
           if (process.argv.includes('--regex') || process.argv.includes('-r')) {
             args.push('--regex', options.regex);
-          }
-          if (process.argv.includes('--limit')) {
-            args.push('--limit', options.limit);
-          }
-          if (process.argv.includes('--threshold')) {
-            args.push('--threshold', options.threshold);
-          }
-          if (process.argv.includes('--on-exceed')) {
-            args.push('--on-exceed', options.onExceed);
-          }
-          if (process.argv.includes('--no-list-similar')) {
-            args.push('--no-list-similar');
-          } else if (process.argv.includes('--list-similar')) {
-            args.push('--list-similar');
           }
           
           const result = spawnSync(process.argv[0], [process.argv[1], ...args], { stdio: 'inherit' });
@@ -219,43 +196,6 @@ program
             console.error(`Sub-scan for ${subPath} failed with exit code ${result.status}`);
             process.exit(result.status ?? 1);
           }
-        }
-      }
-
-      // List similar functions if requested
-      if (options.listSimilar !== false) {
-        console.log('\nFinding most similar elements...');
-        try {
-          const thresholdStr = options.threshold || config.scan?.similarity?.threshold?.toString() || '0.8';
-          const threshold = parseFloat(thresholdStr);
-          const limitStr = options.limit || config.scan?.similarity?.limit?.toString() || '10';
-          const limit = parseInt(limitStr);
-          const onExceed = options.onExceed || config.scan?.similarity?.onExceed || 'warn';
-          
-          // Fetch limit + 1 to detect if the limit is exceeded
-          const pairs = await client.findMostSimilarPairs(threshold, limit + 1);
-
-          if (pairs.length === 0) {
-            console.log('No similar elements found.');
-          } else {
-            const resultsToShow = pairs.slice(0, limit);
-            if (limit > 0) {
-              console.log(`\nFound ${pairs.length > limit ? 'more than ' : ''}${resultsToShow.length} similar elements:`);
-              resultsToShow.forEach((pair, index) => {
-                console.log(`\n${index + 1}. Similarity: ${(pair.similarity * 100).toFixed(1)}%`);
-                console.log(`   Element 1: ${pair.element1.metadata.elementName}`);
-                console.log(`              ${pair.element1.metadata.filePath}:${pair.element1.metadata.lineNumber}`);
-                console.log(`   Element 2: ${pair.element2.metadata.elementName}`);
-                console.log(`              ${pair.element2.metadata.filePath}:${pair.element2.metadata.lineNumber}`);
-              });
-            } else {
-              console.log(`\nFound ${pairs.length} similar elements (limit set to 0).`);
-            }
-
-            handleExceed(pairs.length, limit, onExceed as 'warn' | 'fail');
-          }
-        } catch (error: any) {
-          console.error(`Error finding similar elements: ${error.message}`);
         }
       }
     } catch (error: any) {

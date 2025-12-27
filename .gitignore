@@ -70,3 +70,4 @@ playwright-report/
 *.tsbuildinfo
 
 test_dir/dry-scan.toml
+test_dir/nested/dry-scan.toml
