@@ -58,7 +58,8 @@ export function extractElements(
   excludeRegexes: RegExp[] = [],
   minLength: number = 20,
   commitHash?: string,
-  fileHash?: string
+  fileHash?: string,
+  basePath?: string
 ): ElementData[] {
   const content = fs.readFileSync(filePath, 'utf-8');
   const elements: ElementData[] = [];
@@ -142,6 +143,7 @@ export function extractElements(
             elementName,
             commitHash,
             fileHash,
+            basePath,
           },
           elementString,
         });

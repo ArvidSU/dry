@@ -99,6 +99,7 @@ program
   .description('Scan a file or directory for elements and index them')
   .option('-p, --path <path>', 'File or directory to scan', '.')
   .option('-r, --regex <regex>', 'Regex to match element signatures (overrides config)')
+  .option('--base-path <path>', 'Base path to associate with indexed elements')
   .option('--init', 'Initialize a new dry-scan.toml file')
   .option('--no-wipe', 'Do not wipe previous scans before indexing')
   .action(async (options) => {
@@ -158,6 +159,7 @@ program
       const patterns = config.scan?.patterns || [];
       const extensions = config.scan?.extensions || Array.from(new Set(patterns.flatMap(p => p.extensions)));
       const useIgnoreFiles = config.scan?.use_ignore_files || ['.gitignore', '.dockerignore', '.dryignore'];
+      const basePath = config.scan?.base_path;
 
       const rootPathForIgnore = fs.statSync(resolvedPath).isDirectory() ? resolvedPath : path.dirname(resolvedPath);
       const ignorePatterns = loadIgnoreFiles(rootPathForIgnore, useIgnoreFiles);
@@ -225,7 +227,7 @@ program
             }
           }
 
-          return extractElements(filePath, includePatterns, excludePatterns, minLength, commitHash || undefined, fileHash);
+          return extractElements(filePath, includePatterns, excludePatterns, minLength, commitHash || undefined, fileHash, basePath);
         });
 
         const allElementsResults = await limitConcurrency(elementExtractionTasks, 10);

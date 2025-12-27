@@ -43,9 +43,10 @@ export class SimilarityService {
 
     const allIndices = await this.vectorDb.getAllEmbeddings();
     
-    // Calculate similarities, filter by threshold, sort by similarity, and limit results
+    // Calculate similarities, filter by same basePath and threshold, sort by similarity, and limit results
     const results = allIndices
       .filter(item => item.id !== id) // Don't compare with itself
+      .filter(item => item.elementData.metadata.basePath === target.elementData.metadata.basePath)
       .map(item => ({
         elementData: item.elementData,
         similarity: cosineSimilarity(target.embedding, item.embedding)
@@ -84,6 +85,11 @@ export class SimilarityService {
     // Compare all pairs (avoiding duplicates)
     for (let i = 0; i < allIndices.length; i++) {
       for (let j = i + 1; j < allIndices.length; j++) {
+        // Only compare elements within the same codebase (same basePath)
+        if (allIndices[i].elementData.metadata.basePath !== allIndices[j].elementData.metadata.basePath) {
+          continue;
+        }
+
         const similarity = cosineSimilarity(allIndices[i].embedding, allIndices[j].embedding);
         if (similarity >= threshold) {
           pairs.push({

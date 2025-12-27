@@ -4,6 +4,7 @@ export interface ElementMetadata {
   elementName: string;
   commitHash?: string;
   fileHash?: string;
+  basePath?: string;
 }
 
 export interface ElementData {

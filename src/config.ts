@@ -29,6 +29,7 @@ export interface ScanConfig {
   scan?: {
     extensions?: string[];
     use_ignore_files?: string[];
+    base_path?: string;
     similarity?: SimilarityConfig;
     patterns?: SyntaxPatternGroup[];
   };
@@ -142,6 +143,9 @@ export function resolveConfig(scanPath: string, cliOptions: any): ScanConfig {
   }
   if (cliOptions.extensions) {
     config.scan = { ...config.scan, extensions: cliOptions.extensions.split(',').map((e: string) => e.trim()) };
+  }
+  if (cliOptions.basePath) {
+    config.scan = { ...config.scan, base_path: cliOptions.basePath };
   }
 
   // Ensure similarity config exists before applying CLI overrides
@@ -355,6 +359,9 @@ export function createConfigFile(configPath: string, extensions: string[]) {
   }
   if (config.scan?.use_ignore_files) {
     lines.push(`use_ignore_files = ${formatTomlValue(config.scan.use_ignore_files)}`);
+  }
+  if (config.scan?.base_path) {
+    lines.push(`base_path = ${formatTomlValue(config.scan.base_path)}`);
   }
   lines.push('');
 
