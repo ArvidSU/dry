@@ -4,6 +4,7 @@ import { extractElements } from './extract';
 import { DryClient } from './client';
 import path from 'path';
 import fs from 'fs';
+import { spawnSync } from 'child_process';
 import { resolveConfig, findConfigFile, detectExtensions, createConfigFile, loadIgnoreFiles } from './config';
 import { minimatch } from 'minimatch';
 import readline from 'readline';
@@ -52,20 +53,43 @@ program
   .option('-r, --regex <regex>', 'Regex to match element signatures (overrides config)')
   .option('--init', 'Initialize a new dry-scan.toml file')
   .option('-u, --url <url>', 'DRY server URL (overrides config)')
-  .option('--list-similar', 'List the most similar functions after scanning', true)
-  .option('--limit <limit>', 'Maximum number of similar pairs to list', '10')
-  .option('--threshold <threshold>', 'Similarity threshold for listing similar functions (0-1)', '0.8')
+  .option('--no-wipe', 'Do not wipe previous scans before indexing')
+  .option('--list-similar', 'List the most similar functions after scanning')
+  .option('--no-list-similar', 'Do not list similar functions after scanning')
+  .option('--limit <limit>', 'Maximum number of similar pairs to list')
+  .option('--threshold <threshold>', 'Similarity threshold for listing similar functions (0-1)')
   .option('--on-exceed <action>', 'Action when similar matches exceed limit ("warn" or "fail")')
   .action(async (scanPath, options) => {
     try {
       const resolvedPath = path.resolve(scanPath);
       let configPath = findConfigFile(resolvedPath);
 
-      if (!configPath && fs.statSync(resolvedPath).isDirectory()) {
+      // If --init is provided, we want to create a config file in the target directory
+      // even if one already exists in a parent directory.
+      if (options.init) {
+        const targetConfigPath = path.join(resolvedPath, 'dry-scan.toml');
+        if (fs.existsSync(targetConfigPath)) {
+          console.log(`Config file already exists at ${targetConfigPath}`);
+          configPath = targetConfigPath;
+        } else if (fs.statSync(resolvedPath).isDirectory()) {
+          const detected = detectExtensions(resolvedPath);
+          if (detected.length > 0) {
+            console.log(`Detected potential source extensions: ${detected.join(', ')}`);
+            createConfigFile(targetConfigPath, detected);
+            console.log(`Created ${targetConfigPath}`);
+            configPath = targetConfigPath;
+          } else {
+            console.log('No source extensions detected. Creating a default config.');
+            createConfigFile(targetConfigPath, ['ts', 'js']);
+            console.log(`Created ${targetConfigPath}`);
+            configPath = targetConfigPath;
+          }
+        }
+      } else if (!configPath && fs.statSync(resolvedPath).isDirectory()) {
         const detected = detectExtensions(resolvedPath);
         if (detected.length > 0) {
           console.log(`No dry-scan.toml found. Detected potential source extensions: ${detected.join(', ')}`);
-          const shouldCreate = options.init || await askYesNo('Would you like to create a dry-scan.toml with these extensions?');
+          const shouldCreate = await askYesNo('Would you like to create a dry-scan.toml with these extensions?');
           if (shouldCreate) {
             configPath = path.join(resolvedPath, 'dry-scan.toml');
             createConfigFile(configPath, detected);
@@ -87,76 +111,125 @@ program
       const client = new DryClient(serverUrl);
 
       console.log(`Using server: ${serverUrl}`);
-      console.log('Wiping previous scans...');
-      const deletedCount = await client.wipeAllElements();
-      console.log(`Deleted ${deletedCount} elements from previous scans.`);
+      if (options.wipe !== false) {
+        console.log('Wiping previous scans...');
+        const deletedCount = await client.wipeAllElements();
+        console.log(`Deleted ${deletedCount} elements from previous scans.`);
+      } else {
+        console.log('Skipping wipe (incremental scan).');
+      }
 
       let filesToScan: string[] = [];
+      let subScans: string[] = [];
       const stats = fs.statSync(resolvedPath);
 
       if (stats.isFile()) {
         filesToScan = [resolvedPath];
       } else if (stats.isDirectory()) {
         console.log(`Searching for files in ${resolvedPath} with extensions: ${extensions.join(', ')}...`);
-        filesToScan = getAllFiles(resolvedPath, extensions, ignorePatterns, resolvedPath);
+        const result = getAllFiles(resolvedPath, extensions, ignorePatterns, resolvedPath);
+        filesToScan = result.files;
+        subScans = result.subScans;
       } else {
         throw new Error('Provided path is neither a file nor a directory');
       }
 
-      if (filesToScan.length === 0) {
-        console.log('No files found to scan.');
+      if (filesToScan.length === 0 && subScans.length === 0) {
+        console.log('No files or sub-scans found.');
         return;
       }
 
-      console.log(`Found ${filesToScan.length} files to scan.`);
-      let totalElements = 0;
+      if (filesToScan.length > 0) {
+        console.log(`Found ${filesToScan.length} files to scan in this directory.`);
+        let totalElements = 0;
 
-      for (const filePath of filesToScan) {
-        console.log(`Scanning ${path.relative(process.cwd(), filePath)}...`);
-        
-        const ext = path.extname(filePath).toLowerCase().slice(1);
-        let includePatterns: RegExp[] = [];
-        let excludePatterns: RegExp[] = [];
-        
-        if (options.regex) {
-          includePatterns = [new RegExp(options.regex, 'g')];
-        } else {
-          const matchingGroup = patterns.find(p => p.extensions.includes(ext));
-          if (matchingGroup) {
-            includePatterns = matchingGroup.include.map(p => new RegExp(p, 'g'));
-            if (matchingGroup.exclude) {
-              excludePatterns = matchingGroup.exclude.map(p => new RegExp(p, 'g'));
-            }
+        for (const filePath of filesToScan) {
+          console.log(`Scanning ${path.relative(process.cwd(), filePath)}...`);
+          
+          const ext = path.extname(filePath).toLowerCase().slice(1);
+          let includePatterns: RegExp[] = [];
+          let excludePatterns: RegExp[] = [];
+          
+          if (options.regex) {
+            includePatterns = [new RegExp(options.regex, 'g')];
           } else {
-            // Fallback to default regex if no language specific one is found
-            includePatterns = [/\bfunction\s+(\w+)\s*\(/g];
+            const matchingGroup = patterns.find(p => p.extensions.includes(ext));
+            if (matchingGroup) {
+              includePatterns = matchingGroup.include.map(p => new RegExp(p, 'g'));
+              if (matchingGroup.exclude) {
+                excludePatterns = matchingGroup.exclude.map(p => new RegExp(p, 'g'));
+              }
+            } else {
+              // Fallback to default regex if no language specific one is found
+              includePatterns = [/\bfunction\s+(\w+)\s*\(/g];
+            }
+          }
+
+          const elements = extractElements(filePath, includePatterns, excludePatterns);
+          
+          if (elements.length === 0) continue;
+
+          console.log(`  Found ${elements.length} elements. Submitting...`);
+          for (const element of elements) {
+            try {
+              const id = await client.submitElement(element);
+              console.log(`  Indexed: ${element.metadata.elementName} (ID: ${id})`);
+              totalElements++;
+            } catch (error: any) {
+              console.error(`  Failed to index ${element.metadata.elementName}: ${error.message}`);
+            }
           }
         }
-
-        const elements = extractElements(filePath, includePatterns, excludePatterns);
         
-        if (elements.length === 0) continue;
+        console.log(`\nDone indexing current directory. Indexed ${totalElements} elements from ${filesToScan.length} files.`);
+      }
 
-        console.log(`  Found ${elements.length} elements. Submitting...`);
-        for (const element of elements) {
-          try {
-            const id = await client.submitElement(element);
-            console.log(`  Indexed: ${element.metadata.elementName} (ID: ${id})`);
-            totalElements++;
-          } catch (error: any) {
-            console.error(`  Failed to index ${element.metadata.elementName}: ${error.message}`);
+      // Handle sub-scans
+      if (subScans.length > 0) {
+        console.log(`\nFound ${subScans.length} directories with their own dry-scan.toml. Spawning sub-scans...`);
+        for (const subPath of subScans) {
+          console.log(`\n--- Spawning sub-scan for ${path.relative(process.cwd(), subPath)} ---`);
+          
+          const args = ['scan', subPath, '--no-wipe'];
+          
+          // Only pass through flags that were explicitly provided by the user
+          if (process.argv.includes('--url') || process.argv.includes('-u')) {
+            args.push('--url', options.url);
+          }
+          if (process.argv.includes('--regex') || process.argv.includes('-r')) {
+            args.push('--regex', options.regex);
+          }
+          if (process.argv.includes('--limit')) {
+            args.push('--limit', options.limit);
+          }
+          if (process.argv.includes('--threshold')) {
+            args.push('--threshold', options.threshold);
+          }
+          if (process.argv.includes('--on-exceed')) {
+            args.push('--on-exceed', options.onExceed);
+          }
+          if (process.argv.includes('--no-list-similar')) {
+            args.push('--no-list-similar');
+          } else if (process.argv.includes('--list-similar')) {
+            args.push('--list-similar');
+          }
+          
+          const result = spawnSync(process.argv[0], [process.argv[1], ...args], { stdio: 'inherit' });
+          if (result.status !== 0) {
+            console.error(`Sub-scan for ${subPath} failed with exit code ${result.status}`);
+            process.exit(result.status ?? 1);
           }
         }
       }
-      
-      console.log(`\nDone. Indexed ${totalElements} elements from ${filesToScan.length} files.`);
 
       // List similar functions if requested
-      if (options.listSimilar) {
+      if (options.listSimilar !== false) {
         console.log('\nFinding most similar elements...');
         try {
-          const threshold = parseFloat(options.threshold || config.scan?.similarity?.threshold?.toString() || '0.8');
-          const limit = parseInt(options.limit || config.scan?.similarity?.limit?.toString() || '10');
+          const thresholdStr = options.threshold || config.scan?.similarity?.threshold?.toString() || '0.8';
+          const threshold = parseFloat(thresholdStr);
+          const limitStr = options.limit || config.scan?.similarity?.limit?.toString() || '10';
+          const limit = parseInt(limitStr);
           const onExceed = options.onExceed || config.scan?.similarity?.onExceed || 'warn';
           
           // Fetch limit + 1 to detect if the limit is exceeded
@@ -166,14 +239,18 @@ program
             console.log('No similar elements found.');
           } else {
             const resultsToShow = pairs.slice(0, limit);
-            console.log(`\nFound ${pairs.length > limit ? 'more than ' : ''}${resultsToShow.length} similar elements:`);
-            resultsToShow.forEach((pair, index) => {
-              console.log(`\n${index + 1}. Similarity: ${(pair.similarity * 100).toFixed(1)}%`);
-              console.log(`   Element 1: ${pair.element1.metadata.elementName}`);
-              console.log(`              ${pair.element1.metadata.filePath}:${pair.element1.metadata.lineNumber}`);
-              console.log(`   Element 2: ${pair.element2.metadata.elementName}`);
-              console.log(`              ${pair.element2.metadata.filePath}:${pair.element2.metadata.lineNumber}`);
-            });
+            if (limit > 0) {
+              console.log(`\nFound ${pairs.length > limit ? 'more than ' : ''}${resultsToShow.length} similar elements:`);
+              resultsToShow.forEach((pair, index) => {
+                console.log(`\n${index + 1}. Similarity: ${(pair.similarity * 100).toFixed(1)}%`);
+                console.log(`   Element 1: ${pair.element1.metadata.elementName}`);
+                console.log(`              ${pair.element1.metadata.filePath}:${pair.element1.metadata.lineNumber}`);
+                console.log(`   Element 2: ${pair.element2.metadata.elementName}`);
+                console.log(`              ${pair.element2.metadata.filePath}:${pair.element2.metadata.lineNumber}`);
+              });
+            } else {
+              console.log(`\nFound ${pairs.length} similar elements (limit set to 0).`);
+            }
 
             handleExceed(pairs.length, limit, onExceed as 'warn' | 'fail');
           }
@@ -189,9 +266,11 @@ program
 
 /**
  * Recursively gets all files in a directory that match the given extensions and are not ignored.
+ * If a directory contains its own dry-scan.toml, it's marked as a sub-scan and not recursed.
  */
-function getAllFiles(dirPath: string, extensions: string[], ignorePatterns: string[], rootPath: string): string[] {
-  let results: string[] = [];
+function getAllFiles(dirPath: string, extensions: string[], ignorePatterns: string[], rootPath: string): { files: string[]; subScans: string[] } {
+  let files: string[] = [];
+  let subScans: string[] = [];
   const list = fs.readdirSync(dirPath);
   
   for (const file of list) {
@@ -204,9 +283,6 @@ function getAllFiles(dirPath: string, extensions: string[], ignorePatterns: stri
       // Handle directory patterns like "node_modules/" or ".svelte-kit/"
       if (pattern.endsWith('/')) {
         const dirPattern = pattern.slice(0, -1);
-        // For directories: match the directory itself
-        // For files: match if they're inside the directory (using ** glob)
-        // This handles both "node_modules" and "**/node_modules/**" style patterns
         return minimatch(relativePath, dirPattern) || 
                minimatch(relativePath, `${dirPattern}/**`) ||
                minimatch(relativePath, `**/${dirPattern}/**`);
@@ -217,15 +293,22 @@ function getAllFiles(dirPath: string, extensions: string[], ignorePatterns: stri
     if (isIgnored) continue;
 
     if (stat && stat.isDirectory()) {
-      results = results.concat(getAllFiles(fullPath, extensions, ignorePatterns, rootPath));
+      // If the directory has its own dry-scan.toml, it's a separate scan
+      if (fs.existsSync(path.join(fullPath, 'dry-scan.toml'))) {
+        subScans.push(fullPath);
+      } else {
+        const nested = getAllFiles(fullPath, extensions, ignorePatterns, rootPath);
+        files = files.concat(nested.files);
+        subScans = subScans.concat(nested.subScans);
+      }
     } else {
       const ext = path.extname(file).toLowerCase().slice(1);
       if (extensions.includes(ext)) {
-        results.push(fullPath);
+        files.push(fullPath);
       }
     }
   }
-  return results;
+  return { files, subScans };
 }
 
 program
