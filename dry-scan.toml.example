@@ -16,6 +16,8 @@ use_ignore_files = [".gitignore", ".dockerignore", ".dryignore"]
 threshold = 0.8
 # Default limit for similar pairs/results
 limit = 10
+# Action when similar matches exceed limit ("warn" or "fail")
+onExceed = "warn"
 
 [[scan.patterns]]
 # Language-specific regex patterns for function extraction.

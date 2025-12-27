@@ -27,6 +27,19 @@ async function askYesNo(question: string): Promise<boolean> {
   });
 }
 
+/**
+ * Handles the case where the number of similar matches exceeds the configured limit.
+ */
+function handleExceed(count: number, limit: number, action: 'warn' | 'fail' = 'warn') {
+  if (count > limit) {
+    console.warn(`\nWARNING: Found ${count} similar matches, which exceeds the limit of ${limit}.`);
+    if (action === 'fail') {
+      console.error('Action configured to "fail". Exiting with non-zero code.');
+      process.exit(1);
+    }
+  }
+}
+
 program
   .name('dry')
   .description('Extract elements and find similar code using embeddings')
@@ -42,6 +55,7 @@ program
   .option('--list-similar', 'List the most similar functions after scanning', true)
   .option('--limit <limit>', 'Maximum number of similar pairs to list', '10')
   .option('--threshold <threshold>', 'Similarity threshold for listing similar functions (0-1)', '0.8')
+  .option('--on-exceed <action>', 'Action when similar matches exceed limit ("warn" or "fail")')
   .action(async (scanPath, options) => {
     try {
       const resolvedPath = path.resolve(scanPath);
@@ -143,19 +157,25 @@ program
         try {
           const threshold = parseFloat(options.threshold || config.scan?.similarity?.threshold?.toString() || '0.8');
           const limit = parseInt(options.limit || config.scan?.similarity?.limit?.toString() || '10');
-          const pairs = await client.findMostSimilarPairs(threshold, limit);
+          const onExceed = options.onExceed || config.scan?.similarity?.onExceed || 'warn';
+          
+          // Fetch limit + 1 to detect if the limit is exceeded
+          const pairs = await client.findMostSimilarPairs(threshold, limit + 1);
 
           if (pairs.length === 0) {
             console.log('No similar elements found.');
           } else {
-            console.log(`\nFound ${pairs.length} similar elements:`);
-            pairs.forEach((pair, index) => {
+            const resultsToShow = pairs.slice(0, limit);
+            console.log(`\nFound ${pairs.length > limit ? 'more than ' : ''}${resultsToShow.length} similar elements:`);
+            resultsToShow.forEach((pair, index) => {
               console.log(`\n${index + 1}. Similarity: ${(pair.similarity * 100).toFixed(1)}%`);
               console.log(`   Element 1: ${pair.element1.metadata.elementName}`);
               console.log(`              ${pair.element1.metadata.filePath}:${pair.element1.metadata.lineNumber}`);
               console.log(`   Element 2: ${pair.element2.metadata.elementName}`);
               console.log(`              ${pair.element2.metadata.filePath}:${pair.element2.metadata.lineNumber}`);
             });
+
+            handleExceed(pairs.length, limit, onExceed as 'warn' | 'fail');
           }
         } catch (error: any) {
           console.error(`Error finding similar elements: ${error.message}`);
@@ -296,6 +316,7 @@ program
   .argument('<id>', 'Element ID')
   .option('-t, --threshold <threshold>', 'Similarity threshold (0-1)')
   .option('-l, --limit <limit>', 'Maximum number of results')
+  .option('--on-exceed <action>', 'Action when similar matches exceed limit ("warn" or "fail")')
   .option('-u, --url <url>', 'DRY server URL (overrides config)')
   .action(async (id, options) => {
     try {
@@ -303,26 +324,32 @@ program
       const serverUrl = config.server?.url || 'http://localhost:3000';
       const threshold = parseFloat(options.threshold || config.scan?.similarity?.threshold?.toString() || '0.8');
       const limit = parseInt(options.limit || config.scan?.similarity?.limit?.toString() || '10');
+      const onExceed = options.onExceed || config.scan?.similarity?.onExceed || 'warn';
 
       const client = new DryClient(serverUrl);
       
       console.log(`Using server: ${serverUrl}`);
       console.log(`Finding elements similar to ${id} (threshold: ${threshold}, limit: ${limit})...`);
-      const similar = await client.findSimilar(id, threshold, limit);
+      
+      // Fetch limit + 1 to detect if the limit is exceeded
+      const similar = await client.findSimilar(id, threshold, limit + 1);
       
       if (similar.length === 0) {
         console.log('No similar elements found.');
         return;
       }
 
-      console.log(`Found ${similar.length} similar elements:`);
-      similar.forEach((element, index) => {
+      const resultsToShow = similar.slice(0, limit);
+      console.log(`Found ${similar.length > limit ? 'more than ' : ''}${resultsToShow.length} similar elements:`);
+      resultsToShow.forEach((element, index) => {
         console.log(`\n${index + 1}. ${element.metadata.elementName}`);
         console.log(`   File: ${element.metadata.filePath}:${element.metadata.lineNumber}`);
         console.log(`   ---`);
         console.log(element.elementString.split('\n').slice(0, 5).join('\n'));
         if (element.elementString.split('\n').length > 5) console.log('   ...');
       });
+
+      handleExceed(similar.length, limit, onExceed as 'warn' | 'fail');
     } catch (error: any) {
       console.error(`Error: ${error.message}`);
       process.exit(1);

@@ -12,6 +12,7 @@ export interface SyntaxPatternGroup {
 export interface SimilarityConfig {
   threshold: number;
   limit: number;
+  onExceed?: 'warn' | 'fail';
 }
 
 export interface ScanConfig {
@@ -35,6 +36,7 @@ export const DEFAULT_CONFIG: ScanConfig = {
     similarity: {
       threshold: 0.8,
       limit: 10,
+      onExceed: 'warn',
     },
     patterns: [
       {
@@ -112,6 +114,11 @@ export function resolveConfig(scanPath: string, cliOptions: any): ScanConfig {
     if (!config.scan) config.scan = {};
     if (!config.scan.similarity) config.scan.similarity = { threshold: 0.8, limit: 10 };
     config.scan.similarity.limit = parseInt(cliOptions.limit);
+  }
+  if (cliOptions.onExceed) {
+    if (!config.scan) config.scan = {};
+    if (!config.scan.similarity) config.scan.similarity = { threshold: 0.8, limit: 10 };
+    config.scan.similarity.onExceed = cliOptions.onExceed;
   }
 
   return config;
@@ -291,6 +298,9 @@ export function createConfigFile(configPath: string, extensions: string[]) {
     lines.push('[scan.similarity]');
     lines.push(`threshold = ${config.scan.similarity.threshold}`);
     lines.push(`limit = ${config.scan.similarity.limit}`);
+    if (config.scan.similarity.onExceed) {
+      lines.push(`onExceed = ${formatTomlValue(config.scan.similarity.onExceed)}`);
+    }
     lines.push('');
   }
   
