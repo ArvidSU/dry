@@ -31,6 +31,7 @@
     "@types/iarna__toml": "^2.0.5",
     "@types/minimatch": "^5.1.2",
     "commander": "^12.0.0",
+    "js-xxhash": "^5.0.1",
     "minimatch": "^10.1.1",
     "undici": "^6.21.1"
   },

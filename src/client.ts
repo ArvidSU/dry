@@ -1,5 +1,5 @@
 import { fetch } from 'undici';
-import { ElementData, SubmitElementResponse, SimilarElementsResponse, SimilarPairsResponse, SimilarPair, SearchResult, SearchResponse } from './types';
+import { ElementData, SubmitElementResponse, SimilarElementsResponse, SimilarPairsResponse, SimilarPair, SearchResult, SearchResponse, SubmitBatchResponse } from './types';
 
 export class DryClient {
   private serverUrl: string;
@@ -30,6 +30,31 @@ export class DryClient {
 
     const data = (await response.json()) as SubmitElementResponse;
     return data.id;
+  }
+
+  /**
+   * Submits multiple elements to the server for indexing in a single batch.
+   * @param elements Array of element data
+   * @returns Array of IDs of the indexed elements
+   */
+  async submitElements(elements: ElementData[]): Promise<string[]> {
+    if (elements.length === 0) return [];
+    
+    const response = await fetch(`${this.serverUrl}/elements/batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(elements),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to submit batch (${response.status}): ${errorText}`);
+    }
+
+    const data = (await response.json()) as SubmitBatchResponse;
+    return data.ids;
   }
 
   /**
