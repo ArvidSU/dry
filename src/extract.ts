@@ -56,7 +56,8 @@ export function extractElements(
   filePath: string, 
   includeRegexes: RegExp[], 
   excludeRegexes: RegExp[] = [],
-  minLength: number = 20
+  minLength: number = 20,
+  commitHash?: string
 ): ElementData[] {
   const content = fs.readFileSync(filePath, 'utf-8');
   const elements: ElementData[] = [];
@@ -138,6 +139,7 @@ export function extractElements(
             filePath,
             lineNumber,
             elementName,
+            commitHash,
           },
           elementString,
         });

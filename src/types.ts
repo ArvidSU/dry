@@ -2,6 +2,7 @@ export interface ElementMetadata {
   filePath: string;
   lineNumber: number;
   elementName: string;
+  commitHash?: string;
 }
 
 export interface ElementData {

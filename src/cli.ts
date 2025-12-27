@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import { spawnSync } from 'child_process';
 import { resolveConfig, findConfigFile, detectExtensions, createConfigFile, loadIgnoreFiles, ScanConfig } from './config';
+import { getCommitHash } from './git';
 import { minimatch } from 'minimatch';
 import readline from 'readline';
 import { logger, LogLevel } from './logger';
@@ -129,6 +130,11 @@ program
       // Re-init logger with final config
       initLogger(config);
       
+      const commitHash = getCommitHash(resolvedPath);
+      if (commitHash) {
+        logger.debug(`Detected git commit: ${commitHash}`);
+      }
+      
       const serverUrl = config.server?.url || 'http://localhost:3000';
       const patterns = config.scan?.patterns || [];
       const extensions = config.scan?.extensions || Array.from(new Set(patterns.flatMap(p => p.extensions)));
@@ -198,7 +204,7 @@ program
             }
           }
 
-          const elements = extractElements(filePath, includePatterns, excludePatterns, minLength);
+          const elements = extractElements(filePath, includePatterns, excludePatterns, minLength, commitHash || undefined);
           
           if (elements.length === 0) continue;
 
