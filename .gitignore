@@ -71,3 +71,4 @@ playwright-report/
 
 test_dir/dry-scan.toml
 test_dir/nested/dry-scan.toml
+dry-scan.toml

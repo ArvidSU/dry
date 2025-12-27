@@ -42,4 +42,23 @@ echo "Testing semantic search..."
 # This should yield results if the fix is successful
 bun run src/cli.ts search "function"
 
+# ===============================
+# Verifying code quality, dog food style.
+# ===============================
+
+echo "Verifying code quality by scanning the source code..."
+
+if [ -f .dry-scan.toml ]; then
+  rm .dry-scan.toml
+fi
+
+bun run src/cli.ts scan . --init
+bun run src/cli.ts similar
+
+if [ -f .dry-scan.toml ]; then
+  rm .dry-scan.toml
+fi
+
 docker compose down
+
+echo "Code quality verification complete."

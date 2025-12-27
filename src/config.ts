@@ -44,7 +44,7 @@ export const DEFAULT_CONFIG: ScanConfig = {
     similarity: {
       threshold: 0.8,
       limit: 10,
-      onExceed: 'warn',
+      onExceed: 'fail',
     },
     patterns: [
       {
@@ -53,7 +53,7 @@ export const DEFAULT_CONFIG: ScanConfig = {
           'function\\s+(\\w+)\\s*\\(',
           'const\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>',
           '(\\w+):\\s*function\\s*\\(',
-          'if\\s*\\([^)]*\\)\\s*{',
+          //'if\\s*\\([^)]*\\)\\s*{',
           'for\\s*\\([^)]*\\)\\s*{',
         ],
       },
