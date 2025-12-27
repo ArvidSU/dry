@@ -18,6 +18,7 @@ export interface EmbeddingIndex {
 export interface Config {
   embeddingApiUrl: string;
   embeddingApiKey: string;
+  embeddingChunkSize: number;
   valkeyUrl: string;
   port: number;
 }

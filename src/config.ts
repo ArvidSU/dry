@@ -23,6 +23,7 @@ export interface LoggingConfig {
 export interface ScanConfig {
   server?: {
     url?: string;
+    embedding_chunk_size?: number;
   };
   logging?: LoggingConfig;
   scan?: {
@@ -34,17 +35,18 @@ export interface ScanConfig {
 }
 
 export const DEFAULT_CONFIG: ScanConfig = {
-  server: {
-    url: 'http://localhost:3000',
-  },
-  logging: {
+    server: {
+      url: 'http://localhost:3000',
+      embedding_chunk_size: 1000,
+    },
+    logging: {
     level: 'info',
   },
   scan: {
     use_ignore_files: ['.gitignore', '.dockerignore', '.dryignore'],
     similarity: {
       threshold: 0.85,
-      limit: 5,
+      limit: 10,
       onExceed: 'fail',
     },
     patterns: [
@@ -304,6 +306,7 @@ export function createConfigFile(configPath: string, extensions: string[]) {
   const config: ScanConfig = {
     server: {
       url: 'http://localhost:3000',
+      embedding_chunk_size: DEFAULT_CONFIG.server?.embedding_chunk_size || 1000,
     },
     logging: {
       level: 'info',
@@ -339,6 +342,9 @@ export function createConfigFile(configPath: string, extensions: string[]) {
   lines.push('[server]');
   if (config.server?.url) {
     lines.push(`url = ${formatTomlValue(config.server.url)}`);
+  }
+  if (config.server?.embedding_chunk_size) {
+    lines.push(`embedding_chunk_size = ${config.server.embedding_chunk_size}`);
   }
   lines.push('');
   

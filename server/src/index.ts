@@ -35,6 +35,7 @@ if (process.env.EMBEDDING_API_URL) {
 const config: Config = {
   embeddingApiUrl: embeddingUrl,
   embeddingApiKey: process.env.EMBEDDING_API_KEY || '',
+  embeddingChunkSize: parseInt(process.env.EMBEDDING_CHUNK_SIZE || '1000', 10),
   valkeyUrl: process.env.VALKEY_URL || 'redis://localhost:6379',
   port: parseInt(process.env.PORT || '3000', 10),
 };

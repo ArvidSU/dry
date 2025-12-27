@@ -3,6 +3,8 @@
 [server]
 # The URL of the DRY server
 url = "http://localhost:3000"
+# Maximum characters per embedding chunk
+embedding_chunk_size = 1000
 
 [scan]
 # File extensions to include in the scan

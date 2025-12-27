@@ -215,9 +215,7 @@ program
               logger.debug(`  Indexed: ${element.metadata.elementName} (ID: ${id})`);
               totalElements++;
             } catch (error: any) {
-              // TODO: Implement batching of elements to submit to the server.
-              // This is temporarily silenced to avoid confusing the agent.
-              // logger.error(`  Failed to index ${element.metadata.elementName}: ${error.message}`);
+              logger.error(`  Failed to index ${element.metadata.elementName}: ${error.message}`);
             }
           }
         }
