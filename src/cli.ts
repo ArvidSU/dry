@@ -5,11 +5,35 @@ import { DryClient } from './client';
 import path from 'path';
 import fs from 'fs';
 import { spawnSync } from 'child_process';
-import { resolveConfig, findConfigFile, detectExtensions, createConfigFile, loadIgnoreFiles } from './config';
+import { resolveConfig, findConfigFile, detectExtensions, createConfigFile, loadIgnoreFiles, ScanConfig } from './config';
 import { minimatch } from 'minimatch';
 import readline from 'readline';
+import { logger, LogLevel } from './logger';
 
 const program = new Command();
+
+/**
+ * Maps string log level to LogLevel enum.
+ */
+function mapLogLevel(level: string | undefined): LogLevel {
+  switch (level?.toLowerCase()) {
+    case 'silent': return LogLevel.SILENT;
+    case 'error': return LogLevel.ERROR;
+    case 'warn': return LogLevel.WARN;
+    case 'info': return LogLevel.INFO;
+    case 'verbose': return LogLevel.VERBOSE;
+    case 'debug': return LogLevel.DEBUG;
+    default: return LogLevel.INFO;
+  }
+}
+
+/**
+ * Initializes the logger based on configuration and CLI options.
+ */
+function initLogger(config: ScanConfig) {
+  const level = mapLogLevel(config.logging?.level);
+  logger.setLevel(level);
+}
 
 /**
  * Helper to ask a yes/no question in the terminal.
@@ -33,9 +57,9 @@ async function askYesNo(question: string): Promise<boolean> {
  */
 function handleExceed(count: number, limit: number, action: 'warn' | 'fail' = 'warn') {
   if (count > limit) {
-    console.warn(`\nWARNING: Found ${count} similar matches, which exceeds the limit of ${limit}.`);
+    logger.warn(`Found ${count} similar matches, which exceeds the limit of ${limit}.`);
     if (action === 'fail') {
-      console.error('Action configured to "fail". Exiting with non-zero code.');
+      logger.error('Action configured to "fail". Exiting with non-zero code.');
       process.exit(1);
     }
   }
@@ -44,7 +68,11 @@ function handleExceed(count: number, limit: number, action: 'warn' | 'fail' = 'w
 program
   .name('dry')
   .description('Extract elements and find similar code using embeddings')
-  .version('0.1.0');
+  .version('0.1.0')
+  .option('-v, --verbose', 'Show verbose output')
+  .option('-q, --quiet', 'Show only warnings and errors')
+  .option('--silent', 'Show no output')
+  .option('--debug', 'Show debug output');
 
 program
   .command('scan')
@@ -58,41 +86,48 @@ program
       const resolvedPath = path.resolve(scanPath);
       let configPath = findConfigFile(resolvedPath);
 
+      // We need to resolve config early to initialize logger
+      const tempConfig = resolveConfig(resolvedPath, { ...program.opts(), ...options });
+      initLogger(tempConfig);
+
       // If --init is provided, we want to create a config file in the target directory
       // even if one already exists in a parent directory.
       if (options.init) {
         const targetConfigPath = path.join(resolvedPath, 'dry-scan.toml');
         if (fs.existsSync(targetConfigPath)) {
-          console.log(`Config file already exists at ${targetConfigPath}`);
+          logger.info(`Config file already exists at ${targetConfigPath}`);
           configPath = targetConfigPath;
         } else if (fs.statSync(resolvedPath).isDirectory()) {
           const detected = detectExtensions(resolvedPath);
           if (detected.length > 0) {
-            console.log(`Detected potential source extensions: ${detected.join(', ')}`);
+            logger.info(`Detected potential source extensions: ${detected.join(', ')}`);
             createConfigFile(targetConfigPath, detected);
-            console.log(`Created ${targetConfigPath}`);
+            logger.success(`Created ${targetConfigPath}`);
             configPath = targetConfigPath;
           } else {
-            console.log('No source extensions detected. Creating a default config.');
+            logger.info('No source extensions detected. Creating a default config.');
             createConfigFile(targetConfigPath, ['ts', 'js']);
-            console.log(`Created ${targetConfigPath}`);
+            logger.success(`Created ${targetConfigPath}`);
             configPath = targetConfigPath;
           }
         }
       } else if (!configPath && fs.statSync(resolvedPath).isDirectory()) {
         const detected = detectExtensions(resolvedPath);
         if (detected.length > 0) {
-          console.log(`No dry-scan.toml found. Detected potential source extensions: ${detected.join(', ')}`);
+          const message = `No dry-scan.toml found. Detected potential source extensions: ${detected.join(', ')}`;
+          logger.info(message);
           const shouldCreate = await askYesNo('Would you like to create a dry-scan.toml with these extensions?');
           if (shouldCreate) {
             configPath = path.join(resolvedPath, 'dry-scan.toml');
             createConfigFile(configPath, detected);
-            console.log(`Created ${configPath}`);
+            logger.success(`Created ${configPath}`);
           }
         }
       }
 
-      const config = resolveConfig(resolvedPath, options);
+      const config = resolveConfig(resolvedPath, { ...program.opts(), ...options });
+      // Re-init logger with final config
+      initLogger(config);
       
       const serverUrl = config.server?.url || 'http://localhost:3000';
       const patterns = config.scan?.patterns || [];
@@ -104,13 +139,13 @@ program
       
       const client = new DryClient(serverUrl);
 
-      console.log(`Using server: ${serverUrl}`);
+      logger.info(`Using server: ${serverUrl}`);
       if (options.wipe !== false) {
-        console.log('Wiping previous scans...');
+        logger.info('Wiping previous scans...');
         const deletedCount = await client.wipeAllElements();
-        console.log(`Deleted ${deletedCount} elements from previous scans.`);
+        logger.info(`Deleted ${deletedCount} elements from previous scans.`);
       } else {
-        console.log('Skipping wipe (incremental scan).');
+        logger.info('Skipping wipe (incremental scan).');
       }
 
       let filesToScan: string[] = [];
@@ -120,7 +155,7 @@ program
       if (stats.isFile()) {
         filesToScan = [resolvedPath];
       } else if (stats.isDirectory()) {
-        console.log(`Searching for files in ${resolvedPath} with extensions: ${extensions.join(', ')}...`);
+        logger.verbose(`Searching for files in ${resolvedPath} with extensions: ${extensions.join(', ')}...`);
         const result = getAllFiles(resolvedPath, extensions, ignorePatterns, resolvedPath);
         filesToScan = result.files;
         subScans = result.subScans;
@@ -129,16 +164,16 @@ program
       }
 
       if (filesToScan.length === 0 && subScans.length === 0) {
-        console.log('No files or sub-scans found.');
+        logger.info('No files or sub-scans found.');
         return;
       }
 
       if (filesToScan.length > 0) {
-        console.log(`Found ${filesToScan.length} files to scan in this directory.`);
+        logger.info(`Found ${filesToScan.length} files to scan in this directory.`);
         let totalElements = 0;
 
         for (const filePath of filesToScan) {
-          console.log(`Scanning ${path.relative(process.cwd(), filePath)}...`);
+          logger.verbose(`Scanning ${path.relative(process.cwd(), filePath)}...`);
           
           const ext = path.extname(filePath).toLowerCase().slice(1);
           let includePatterns: RegExp[] = [];
@@ -163,26 +198,26 @@ program
           
           if (elements.length === 0) continue;
 
-          console.log(`  Found ${elements.length} elements. Submitting...`);
+          logger.verbose(`  Found ${elements.length} elements. Submitting...`);
           for (const element of elements) {
             try {
               const id = await client.submitElement(element);
-              console.log(`  Indexed: ${element.metadata.elementName} (ID: ${id})`);
+              logger.debug(`  Indexed: ${element.metadata.elementName} (ID: ${id})`);
               totalElements++;
             } catch (error: any) {
-              console.error(`  Failed to index ${element.metadata.elementName}: ${error.message}`);
+              logger.error(`  Failed to index ${element.metadata.elementName}: ${error.message}`);
             }
           }
         }
         
-        console.log(`\nDone indexing current directory. Indexed ${totalElements} elements from ${filesToScan.length} files.`);
+        logger.success(`Done indexing current directory. Indexed ${totalElements} elements from ${filesToScan.length} files.`);
       }
 
       // Handle sub-scans
       if (subScans.length > 0) {
-        console.log(`\nFound ${subScans.length} directories with their own dry-scan.toml. Spawning sub-scans...`);
+        logger.info(`Found ${subScans.length} directories with their own dry-scan.toml. Spawning sub-scans...`);
         for (const subPath of subScans) {
-          console.log(`\n--- Spawning sub-scan for ${path.relative(process.cwd(), subPath)} ---`);
+          logger.info(`\n--- Spawning sub-scan for ${path.relative(process.cwd(), subPath)} ---`);
           
           const args = ['scan', subPath, '--no-wipe'];
           
@@ -190,16 +225,20 @@ program
           if (process.argv.includes('--regex') || process.argv.includes('-r')) {
             args.push('--regex', options.regex);
           }
+          if (program.opts().verbose) args.push('--verbose');
+          if (program.opts().quiet) args.push('--quiet');
+          if (program.opts().silent) args.push('--silent');
+          if (program.opts().debug) args.push('--debug');
           
           const result = spawnSync(process.argv[0], [process.argv[1], ...args], { stdio: 'inherit' });
           if (result.status !== 0) {
-            console.error(`Sub-scan for ${subPath} failed with exit code ${result.status}`);
+            logger.error(`Sub-scan for ${subPath} failed with exit code ${result.status}`);
             process.exit(result.status ?? 1);
           }
         }
       }
     } catch (error: any) {
-      console.error(`Error: ${error.message}`);
+      logger.error(`${error.message}`);
       process.exit(1);
     }
   });
@@ -260,6 +299,9 @@ program
     try {
       const resolvedPath = path.resolve(discoverPath);
       
+      const config = resolveConfig(resolvedPath, { ...program.opts(), ...options });
+      initLogger(config);
+
       if (!fs.existsSync(resolvedPath)) {
         throw new Error(`Path does not exist: ${resolvedPath}`);
       }
@@ -325,10 +367,10 @@ program
         ? excludedDirsArray.map(dir => `'${dir}'`).join(', ')
         : '(none)';
 
-      console.log(`DISCOVERED EXTENSIONS: ${extensionsStr}`);
-      console.log(`EXCLUDED DIRECTORIES: ${excludedDirsStr}`);
+      logger.info(`DISCOVERED EXTENSIONS: ${extensionsStr}`);
+      logger.info(`EXCLUDED DIRECTORIES: ${excludedDirsStr}`);
     } catch (error: any) {
-      console.error(`Error: ${error.message}`);
+      logger.error(`${error.message}`);
       process.exit(1);
     }
   });
@@ -341,7 +383,9 @@ program
   .option('--on-exceed <action>', 'Action when similar matches exceed limit ("warn" or "fail")')
   .action(async (options) => {
     try {
-      const config = resolveConfig(process.cwd(), options);
+      const config = resolveConfig(process.cwd(), { ...program.opts(), ...options });
+      initLogger(config);
+
       const serverUrl = config.server?.url || 'http://localhost:3000';
       const threshold = parseFloat(options.threshold || config.scan?.similarity?.threshold?.toString() || '0.8');
       const limit = parseInt(options.limit || config.scan?.similarity?.limit?.toString() || '10');
@@ -349,37 +393,37 @@ program
 
       const client = new DryClient(serverUrl);
       
-      console.log(`Using server: ${serverUrl}`);
-      console.log(`Finding most similar pairs (threshold: ${threshold}, limit: ${limit})...`);
+      logger.info(`Using server: ${serverUrl}`);
+      logger.info(`Finding most similar pairs (threshold: ${threshold}, limit: ${limit})...`);
       
       // Fetch limit + 1 to detect if the limit is exceeded
       const pairs = await client.findMostSimilarPairs(threshold, limit + 1);
       
       if (pairs.length === 0) {
-        console.log('No similar element pairs found.');
+        logger.info('No similar element pairs found.');
         return;
       }
 
       const resultsToShow = pairs.slice(0, limit);
-      console.log(`Found ${pairs.length > limit ? 'more than ' : ''}${resultsToShow.length} similar element pairs:`);
+      logger.log(`Found ${pairs.length > limit ? 'more than ' : ''}${resultsToShow.length} similar element pairs:`);
       resultsToShow.forEach((pair, index) => {
         const { element1, element2, similarity } = pair;
-        console.log(`\n${index + 1}. Similarity: ${(similarity * 100).toFixed(1)}%`);
-        console.log(`   Element 1: ${element1.metadata.elementName} (${element1.metadata.filePath}:${element1.metadata.lineNumber})`);
-        console.log(`   Element 2: ${element2.metadata.elementName} (${element2.metadata.filePath}:${element2.metadata.lineNumber})`);
-        console.log(`   ---`);
+        logger.log(`\n${index + 1}. Similarity: ${(similarity * 100).toFixed(1)}%`);
+        logger.log(`   Element 1: ${element1.metadata.elementName} (${element1.metadata.filePath}:${element1.metadata.lineNumber})`);
+        logger.log(`   Element 2: ${element2.metadata.elementName} (${element2.metadata.filePath}:${element2.metadata.lineNumber})`);
+        logger.log(`   ---`);
         // Show snippet of both? Or just one? Let's show a snippet of both to compare.
-        console.log(`   Element 1 Snippet:`);
-        console.log(element1.elementString.split('\n').slice(0, 3).join('\n'));
-        if (element1.elementString.split('\n').length > 3) console.log('   ...');
-        console.log(`   Element 2 Snippet:`);
-        console.log(element2.elementString.split('\n').slice(0, 3).join('\n'));
-        if (element2.elementString.split('\n').length > 3) console.log('   ...');
+        logger.log(`   Element 1 Snippet:`);
+        logger.log(element1.elementString.split('\n').slice(0, 3).join('\n'));
+        if (element1.elementString.split('\n').length > 3) logger.log('   ...');
+        logger.log(`   Element 2 Snippet:`);
+        logger.log(element2.elementString.split('\n').slice(0, 3).join('\n'));
+        if (element2.elementString.split('\n').length > 3) logger.log('   ...');
       });
 
       handleExceed(pairs.length, limit, onExceed as 'warn' | 'fail');
     } catch (error: any) {
-      console.error(`Error: ${error.message}`);
+      logger.error(`${error.message}`);
       process.exit(1);
     }
   });
@@ -394,7 +438,9 @@ program
   .action(async (queryParts, options) => {
     try {
       const query = queryParts.join(' ');
-      const config = resolveConfig(process.cwd(), options);
+      const config = resolveConfig(process.cwd(), { ...program.opts(), ...options });
+      initLogger(config);
+
       const serverUrl = config.server?.url || 'http://localhost:3000';
       // Default threshold for semantic search is lower than for code similarity (0.5 vs 0.8)
       const threshold = parseFloat(options.threshold || '0.5');
@@ -402,27 +448,27 @@ program
 
       const client = new DryClient(serverUrl);
       
-      console.log(`Using server: ${serverUrl}`);
-      console.log(`Searching for: "${query}" (threshold: ${threshold}, limit: ${limit})...`);
+      logger.info(`Using server: ${serverUrl}`);
+      logger.info(`Searching for: "${query}" (threshold: ${threshold}, limit: ${limit})...`);
       
       const results = await client.search(query, threshold, limit);
       
       if (results.length === 0) {
-        console.log('No matching elements found.');
+        logger.info('No matching elements found.');
         return;
       }
 
-      console.log(`\nFound ${results.length} results:`);
+      logger.log(`\nFound ${results.length} results:`);
       results.forEach((result, index) => {
         const { element, similarity } = result;
-        console.log(`\n${index + 1}. ${element.metadata.elementName} (Similarity: ${(similarity * 100).toFixed(1)}%)`);
-        console.log(`   File: ${element.metadata.filePath}:${element.metadata.lineNumber}`);
-        console.log(`   ---`);
-        console.log(element.elementString.split('\n').slice(0, 5).join('\n'));
-        if (element.elementString.split('\n').length > 5) console.log('   ...');
+        logger.log(`\n${index + 1}. ${element.metadata.elementName} (Similarity: ${(similarity * 100).toFixed(1)}%)`);
+        logger.log(`   File: ${element.metadata.filePath}:${element.metadata.lineNumber}`);
+        logger.log(`   ---`);
+        logger.log(element.elementString.split('\n').slice(0, 5).join('\n'));
+        if (element.elementString.split('\n').length > 5) logger.log('   ...');
       });
     } catch (error: any) {
-      console.error(`Error: ${error.message}`);
+      logger.error(`${error.message}`);
       process.exit(1);
     }
   });

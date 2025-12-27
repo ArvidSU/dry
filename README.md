@@ -191,6 +191,12 @@ The configuration uses Docker Compose models to run the EmbeddingGemma model. Th
 
 ### CLI Options
 
+#### Global Options
+- `-v, --verbose`: Show verbose output (per-file scanning details)
+- `-q, --quiet`: Show only warnings and errors
+- `--silent`: Show no output
+- `--debug`: Show debug output (element-level details and API interactions)
+
 #### `scan` command
 - `--url, -u`: Server endpoint (default: `http://localhost:3000`)
 - `--regex, -r`: Regex pattern to match element signatures (overrides config)
@@ -211,6 +217,10 @@ The CLI looks for a `dry-scan.toml` file in the current or parent directories. I
 ```toml
 [server]
 url = "http://localhost:3000"
+
+[logging]
+# Log levels: silent, error, warn, info, verbose, debug
+level = "info"
 
 [scan]
 extensions = ["ts", "tsx", "js", "jsx", "py", "go"]
@@ -248,6 +258,7 @@ include = [
 
 **Configuration options:**
 - `[server].url`: DRY server endpoint
+- `[logging].level`: Default log level
 - `[scan].extensions`: File extensions to scan (without the dot)
 - `[scan].use_ignore_files`: List of files (like `.gitignore`) to load additional ignore patterns from
 - `[scan].similarity.threshold`: Default similarity threshold (0-1)

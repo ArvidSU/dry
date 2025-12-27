@@ -15,10 +15,15 @@ export interface SimilarityConfig {
   onExceed?: 'warn' | 'fail';
 }
 
+export interface LoggingConfig {
+  level?: 'silent' | 'error' | 'warn' | 'info' | 'verbose' | 'debug';
+}
+
 export interface ScanConfig {
   server?: {
     url?: string;
   };
+  logging?: LoggingConfig;
   scan?: {
     extensions?: string[];
     use_ignore_files?: string[];
@@ -30,6 +35,9 @@ export interface ScanConfig {
 export const DEFAULT_CONFIG: ScanConfig = {
   server: {
     url: 'http://localhost:3000',
+  },
+  logging: {
+    level: 'info',
   },
   scan: {
     use_ignore_files: ['.gitignore', '.dockerignore', '.dryignore'],
@@ -119,6 +127,17 @@ export function resolveConfig(scanPath: string, cliOptions: any): ScanConfig {
     if (!config.scan) config.scan = {};
     if (!config.scan.similarity) config.scan.similarity = { threshold: 0.8, limit: 10 };
     config.scan.similarity.onExceed = cliOptions.onExceed;
+  }
+
+  // Handle logging CLI options
+  if (cliOptions.verbose) {
+    config.logging = { ...config.logging, level: 'verbose' };
+  } else if (cliOptions.quiet) {
+    config.logging = { ...config.logging, level: 'warn' };
+  } else if (cliOptions.debug) {
+    config.logging = { ...config.logging, level: 'debug' };
+  } else if (cliOptions.silent) {
+    config.logging = { ...config.logging, level: 'silent' };
   }
 
   return config;
@@ -292,6 +311,13 @@ export function createConfigFile(configPath: string, extensions: string[]) {
     lines.push(`use_ignore_files = ${formatTomlValue(config.scan.use_ignore_files)}`);
   }
   lines.push('');
+
+  // Logging section
+  if (config.logging?.level) {
+    lines.push('[logging]');
+    lines.push(`level = ${formatTomlValue(config.logging.level)}`);
+    lines.push('');
+  }
   
   // Similarity section
   if (config.scan?.similarity) {
