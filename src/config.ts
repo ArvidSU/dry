@@ -7,6 +7,7 @@ export interface SyntaxPatternGroup {
   extensions: string[];
   include: string[];
   exclude?: string[];
+  min_length?: number;
 }
 
 export interface SimilarityConfig {
@@ -42,8 +43,8 @@ export const DEFAULT_CONFIG: ScanConfig = {
   scan: {
     use_ignore_files: ['.gitignore', '.dockerignore', '.dryignore'],
     similarity: {
-      threshold: 0.8,
-      limit: 10,
+      threshold: 0.85,
+      limit: 5,
       onExceed: 'fail',
     },
     patterns: [
@@ -53,9 +54,39 @@ export const DEFAULT_CONFIG: ScanConfig = {
           'function\\s+(\\w+)\\s*\\(',
           'const\\s+(\\w+)\\s*=\\s*\\([^)]*\\)\\s*=>',
           '(\\w+):\\s*function\\s*\\(',
-          //'if\\s*\\([^)]*\\)\\s*{',
+          'if\\s*\\([^)]*\\)\\s*{',
           'for\\s*\\([^)]*\\)\\s*{',
         ],
+        min_length: 20,
+      },
+      {
+        extensions: ['rs'],
+        include: [
+          'fn\\s+(\\w+)\\s*\\(',
+          'impl\\s+.*\\s*\\{',
+          'if\\s+.*\\s*\\{',
+          'for\\s+.*\\s*\\{',
+          'match\\s+.*\\s*\\{',
+          'struct\\s+(\\w+)',
+          'trait\\s+(\\w+)',
+          'enum\\s+(\\w+)',
+        ],
+        min_length: 20,
+      },
+      {
+        extensions: ['py'],
+        include: [
+          'def\\s+(\\w+)\\s*\\(',
+          'class\\s+(\\w+)',
+          'if\\s+.*:',
+          'for\\s+.*:',
+          'while\\s+.*:',
+          'with\\s+.*:',
+          'try\\s*:',
+          'except\\s+.*:',
+          'async\\s+def\\s+(\\w+)\\s*\\(',
+        ],
+        min_length: 20,
       },
     ],
   },
@@ -101,10 +132,7 @@ export function loadConfig(configPath: string): ScanConfig {
  */
 export function resolveConfig(scanPath: string, cliOptions: any): ScanConfig {
   const configPath = findConfigFile(path.resolve(scanPath));
-  let config: ScanConfig = {};
-  if (configPath) {
-    config = loadConfig(configPath);
-  }
+  let config: ScanConfig = configPath ? loadConfig(configPath) : {};
 
   // Merge CLI options (CLI overrides config)
   if (cliOptions.url) {
@@ -113,32 +141,37 @@ export function resolveConfig(scanPath: string, cliOptions: any): ScanConfig {
   if (cliOptions.extensions) {
     config.scan = { ...config.scan, extensions: cliOptions.extensions.split(',').map((e: string) => e.trim()) };
   }
-  if (cliOptions.threshold) {
+
+  // Ensure similarity config exists before applying CLI overrides
+  if (cliOptions.threshold || cliOptions.limit || cliOptions.onExceed) {
     if (!config.scan) config.scan = {};
-    if (!config.scan.similarity) config.scan.similarity = { threshold: 0.8, limit: 10 };
-    config.scan.similarity.threshold = parseFloat(cliOptions.threshold);
-  }
-  if (cliOptions.limit) {
-    if (!config.scan) config.scan = {};
-    if (!config.scan.similarity) config.scan.similarity = { threshold: 0.8, limit: 10 };
-    config.scan.similarity.limit = parseInt(cliOptions.limit);
-  }
-  if (cliOptions.onExceed) {
-    if (!config.scan) config.scan = {};
-    if (!config.scan.similarity) config.scan.similarity = { threshold: 0.8, limit: 10 };
-    config.scan.similarity.onExceed = cliOptions.onExceed;
+    if (!config.scan.similarity) {
+      config.scan.similarity = { ...DEFAULT_CONFIG.scan?.similarity } as SimilarityConfig;
+    }
+    if (cliOptions.threshold) {
+      config.scan.similarity.threshold = parseFloat(cliOptions.threshold);
+    }
+    if (cliOptions.limit) {
+      config.scan.similarity.limit = parseInt(cliOptions.limit);
+    }
+    if (cliOptions.onExceed) {
+      config.scan.similarity.onExceed = cliOptions.onExceed;
+    }
   }
 
+  var logLevel: LoggingConfig['level'] = 'info';
   // Handle logging CLI options
   if (cliOptions.verbose) {
-    config.logging = { ...config.logging, level: 'verbose' };
+    logLevel = 'verbose';
   } else if (cliOptions.quiet) {
-    config.logging = { ...config.logging, level: 'warn' };
+    logLevel = 'warn';
   } else if (cliOptions.debug) {
-    config.logging = { ...config.logging, level: 'debug' };
+    logLevel = 'debug';
   } else if (cliOptions.silent) {
-    config.logging = { ...config.logging, level: 'silent' };
+    logLevel = 'silent';
   }
+
+  config.logging = { ...config.logging, level: logLevel };
 
   return config;
 }
@@ -272,6 +305,9 @@ export function createConfigFile(configPath: string, extensions: string[]) {
     server: {
       url: 'http://localhost:3000',
     },
+    logging: {
+      level: 'info',
+    },
     scan: {
       extensions: extensions.length > 0 ? extensions : DEFAULT_CONFIG.scan?.extensions,
       use_ignore_files: ['.gitignore', '.dockerignore', '.dryignore'],
@@ -282,12 +318,16 @@ export function createConfigFile(configPath: string, extensions: string[]) {
 
   // Add pattern groups that match detected extensions
   if (config.scan && config.scan.patterns && DEFAULT_CONFIG.scan?.patterns) {
-    const addedPatterns = new Set<SyntaxPatternGroup>();
+    const addedPatterns = new Set<string>();
     for (const ext of extensions) {
       const group = DEFAULT_CONFIG.scan.patterns.find(p => p.extensions.includes(ext));
-      if (group && !addedPatterns.has(group)) {
-        config.scan.patterns.push(group);
-        addedPatterns.add(group);
+      if (group) {
+        const groupKey = group.extensions.sort().join(',');
+        if (!addedPatterns.has(groupKey)) {
+          // Copy the entire group object to ensure all properties (including min_length) are included
+          config.scan.patterns.push({ ...group });
+          addedPatterns.add(groupKey);
+        }
       }
     }
   }
@@ -313,11 +353,11 @@ export function createConfigFile(configPath: string, extensions: string[]) {
   lines.push('');
 
   // Logging section
+  lines.push('[logging]');
   if (config.logging?.level) {
-    lines.push('[logging]');
     lines.push(`level = ${formatTomlValue(config.logging.level)}`);
-    lines.push('');
   }
+  lines.push('');
   
   // Similarity section
   if (config.scan?.similarity) {
@@ -340,6 +380,9 @@ export function createConfigFile(configPath: string, extensions: string[]) {
       lines.push(`include = ${formatTomlValue(group.include, true)}`);
       if (group.exclude && group.exclude.length > 0) {
         lines.push(`exclude = ${formatTomlValue(group.exclude, true)}`);
+      }
+      if (group.min_length !== undefined) {
+        lines.push(`min_length = ${group.min_length}`);
       }
       lines.push('');
     }

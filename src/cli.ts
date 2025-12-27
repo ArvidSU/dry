@@ -77,13 +77,13 @@ program
 program
   .command('scan')
   .description('Scan a file or directory for elements and index them')
-  .argument('<path>', 'File or directory to scan')
+  .option('-p, --path <path>', 'File or directory to scan', '.')
   .option('-r, --regex <regex>', 'Regex to match element signatures (overrides config)')
   .option('--init', 'Initialize a new dry-scan.toml file')
   .option('--no-wipe', 'Do not wipe previous scans before indexing')
-  .action(async (scanPath, options) => {
+  .action(async (options) => {
     try {
-      const resolvedPath = path.resolve(scanPath);
+      const resolvedPath = path.resolve(options.path);
       let configPath = findConfigFile(resolvedPath);
 
       // We need to resolve config early to initialize logger
@@ -178,6 +178,7 @@ program
           const ext = path.extname(filePath).toLowerCase().slice(1);
           let includePatterns: RegExp[] = [];
           let excludePatterns: RegExp[] = [];
+          let minLength = 20;
           
           if (options.regex) {
             includePatterns = [new RegExp(options.regex, 'g')];
@@ -188,13 +189,16 @@ program
               if (matchingGroup.exclude) {
                 excludePatterns = matchingGroup.exclude.map(p => new RegExp(p, 'g'));
               }
+              if (matchingGroup.min_length) {
+                minLength = matchingGroup.min_length;
+              }
             } else {
               // Fallback to default regex if no language specific one is found
               includePatterns = [/\bfunction\s+(\w+)\s*\(/g];
             }
           }
 
-          const elements = extractElements(filePath, includePatterns, excludePatterns);
+          const elements = extractElements(filePath, includePatterns, excludePatterns, minLength);
           
           if (elements.length === 0) continue;
 

@@ -55,7 +55,8 @@ function isInsideComment(content: string, position: number): boolean {
 export function extractElements(
   filePath: string, 
   includeRegexes: RegExp[], 
-  excludeRegexes: RegExp[] = []
+  excludeRegexes: RegExp[] = [],
+  minLength: number = 20
 ): ElementData[] {
   const content = fs.readFileSync(filePath, 'utf-8');
   const elements: ElementData[] = [];
@@ -129,6 +130,9 @@ export function extractElements(
 
       if (bodyEndIndex !== -1) {
         const elementString = content.substring(startIndex, bodyEndIndex);
+        if (elementString.length < minLength) {
+          continue;
+        }
         elements.push({
           metadata: {
             filePath,

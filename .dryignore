@@ -1,2 +1,4 @@
 test_dir/
 .svelte-kit/
+**/*.test*
+**/logger.ts
